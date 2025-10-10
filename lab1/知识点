@@ -1,1 +1,3 @@
-
+la指令：la(load address),顾名思义，它是一条地址加载指令。la rd,symbol它将一个内存地址（symbol是一个地址标记）的值加载到rd寄存器中。
+tail指令：可用于查看文件的内容，有一个常用的参数 -f 常用于查阅正在改变的日志文件。tail -f filename 会把 filename 文件里的最尾部的内容显示在屏幕上，并且不断刷新，只要 filename 更新就可以看到最新的文件内容。
+elf文件和bin文件的区别：源代码 → 编译 → ELF文件 → objcopy → BIN文件
