@@ -1,3 +1,33 @@
 la指令：la(load address),顾名思义，它是一条地址加载指令。la rd,symbol它将一个内存地址（symbol是一个地址标记）的值加载到rd寄存器中。
+
 tail指令：可用于查看文件的内容，有一个常用的参数 -f 常用于查阅正在改变的日志文件。tail -f filename 会把 filename 文件里的最尾部的内容显示在屏幕上，并且不断刷新，只要 filename 更新就可以看到最新的文件内容。
+
 elf文件和bin文件的区别：源代码 → 编译 → ELF文件 → objcopy → BIN文件
+
+Gcc 编译出来的是ELF文件。通常gcc –o test test.c,生成的test文件就是ELF格式的，在linuxshell下输入 ./test就可以执行。
+
+Bin 文件是经过压缩的可执行文件，去掉ELF格式的东西。是直接的内存映像的表示。在系统没有加载操作系统的时候可以执行。
+可执行内核的完整启动流程：加电复位 → CPU从0x1000进入MROM → 跳转到0x80000000(OpenSBI) → OpenSBI初始化并加载内核到0x80200000 → 跳转到entry.S → 调用kern_init() → 输出信息 → 结束。
+详细步骤，第一步硬件初始化和固件启动，QEMU 模拟器启动后，会模拟加电复位过程，OpenSBI 被加载到物理内存的0x80000000处。
+第二步OpenSBI 初始化与内核加载。CPU 跳转到0x80000000处继续运行。OpenSBI 运行在 RISC-V 的最高特权级（M 模式），负责初始化处理器的运行环境。
+第三步是内核启动执行。OpenSBI 完成相关工作后，跳转到0x80200000地址，开始执行kern/init/entry.S。
+
+OpenSBI (Open Supervisor Binary Interface) 是 RISC-V 架构中的标准引导固件，他负责boot(开机)，还负责load(加载OS到内存里)，相当于 x86 架构中的 BIOS/UEFI。
+RISC-V 有三种特权模式：
+M模式 (Machine Mode)：最高权限，OpenSBI 运行在此模式
+S模式 (Supervisor Mode)：操作系统内核模式
+U模式 (User Mode)：应用程序模式
+OpenSBI 负责从 M模式 切换到 S模式。
+
+gnu工具链中，包含一个链接器 ld。链接器的作用是把输入文件（往往是 .o 文件）链接成输出文件（往往是 elf 文件）。
+
+为什么需要内联汇编？在 C 语言中，我们无法直接执行 ecall 这样的特定指令，也无法精确控制哪个变量放入哪个寄存器。因此，我们必须借助内联汇编（Inline Assembly） 来“手动”完成上述步骤，将底层指令的调用封装成一个对 C 语言友好的函数。
+
+makefile:
+target ... : prerequisites ...
+    command
+    ...
+    ...
+target也就是一个目标文件，可以是object file，也可以是执行文件。还可以是一个标签（label）。
+prerequisites就是，要生成那个target所需要的文件或是目标。command也就是make需要执行的命令（任意的shell命令）。 这是一个文件的依赖关系，也就是说，target这一个或多个的目标文件依赖于prerequisites中的文件，其生成规则定义在 command中。如果prerequisites中有一个以上的文件比target文件要新，那么command所定义的命令就会被执行。
+这就是makefile的规则。也就是makefile中最核心的内容
