@@ -39,6 +39,8 @@ first fit算法的主要策略是从空闲链表中找到第一个足够大的�
 你的 Best-Fit 算法是否有进一步的改进空间？
 
 **best_fit_init_memmap**:
+
+```
 static void
 best_fit_init_memmap(struct Page *base, size_t n) {
     assert(n > 0);
@@ -78,7 +80,10 @@ best_fit_init_memmap(struct Page *base, size_t n) {
         }
     }
 }
+```
+
 **best_fit_alloc_pages**:
 
 **best_fit_free_pages**:
+
 
