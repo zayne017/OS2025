@@ -40,6 +40,7 @@ first fit算法的主要策略是从空闲链表中找到第一个足够大的�
 
 **best_fit_init_memmap**:
 
+主要是初始化空闲块并按物理地址递增的顺序插入free_list，这部分和first fit是完全一样的。
 ```
 static void
 best_fit_init_memmap(struct Page *base, size_t n) {
@@ -85,6 +86,7 @@ best_fit_init_memmap(struct Page *base, size_t n) {
 **best_fit_alloc_pages**:
 
 **best_fit_free_pages**:
+
 
 
 
