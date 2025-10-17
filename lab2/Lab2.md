@@ -70,7 +70,7 @@ best_fit_init_memmap(struct Page *base, size_t n) {
             // 1、当base < page时，找到第一个大于base的页，将base插入到它前面，并退出循环
             // 2、当list_next(le) == &free_list时，若已经到达链表结尾，将base插入到链表尾部
             // 2) 有序插入 free_list（保持从低地址到高地址）
-            // 这里和first fit也是完全一样 就是从头往后遍历空闲链表 按照物理地址有序插入 best fit和first fit 的主要区别在后面
+            // 这里和first fit也是完全一样，就是从头往后遍历空闲链表，按照物理地址有序插入，best fit和first fit的主要区别在后面
             if (base < page) {
             list_add_before(le, &(base->page_link));
             break;
@@ -85,5 +85,6 @@ best_fit_init_memmap(struct Page *base, size_t n) {
 **best_fit_alloc_pages**:
 
 **best_fit_free_pages**:
+
 
 
