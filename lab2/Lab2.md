@@ -190,9 +190,16 @@ best_fit_free_pages(struct Page *base, size_t n) {
  最后合并相邻空闲块：
  分别检查与前一个页块是否连续，与后一个页块是否连续
 ```
+改进空间：
+1、可以使用桶排序等其他思路扫描整个链表而非线性查找。
+2、可以对不同请求进行筛选从而使用不同的策略执行来降低复杂度。
+
+
+
 将pmm.c中的pmm_manager更改为best_fit_pmm_manager，通过make grade测试，结果如下
 
 ![lab2](./lab2.png)
+
 
 
 
