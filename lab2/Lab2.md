@@ -84,6 +84,8 @@ best_fit_init_memmap(struct Page *base, size_t n) {
 ```
 
 **best_fit_alloc_pages**:
+主要思路是，我们顺序查找，通过预先定义的min_size记录最小连续空闲页框数量，如果有页面的property大于等于n并且property小于min_size，我们就用变量page记录改页面，并修改min_size为当前页面的property，如此往复直到循环结束。
+此时，我们得到了满足需求的页面page，并且min_size是当前最小连续空闲页框数量。
 ```c
 best_fit_alloc_pages(size_t n) {
     assert(n > 0);
