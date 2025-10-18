@@ -123,6 +123,66 @@ best_fit_alloc_pages(size_t n) {
 ```
 
 **best_fit_free_pages**:
+static void
+best_fit_free_pages(struct Page *base, size_t n) {
+    assert(n > 0);
+    struct Page *p = base;
+    for (; p != base + n; p ++) {
+        assert(!PageReserved(p) && !PageProperty(p));
+        p->flags = 0;
+        set_page_ref(p, 0);
+    }
+    /*LAB2 EXERCISE 2: YOUR CODE*/ 
+    // 编写代码
+    // 具体来说就是设置当前页块的属性为释放的页块数、并将当前页块标记为已分配状态、最后增加nr_free的值
+    base->property = n;
+    SetPageProperty(base);
+    nr_free += n;
+
+    if (list_empty(&free_list)) {
+        list_add(&free_list, &(base->page_link));
+    } else {
+        list_entry_t* le = &free_list;
+        while ((le = list_next(le)) != &free_list) {
+            struct Page* page = le2page(le, page_link);
+            if (base < page) {
+                list_add_before(le, &(base->page_link));
+                break;
+            } else if (list_next(le) == &free_list) {
+                list_add(le, &(base->page_link));
+                break;
+            }
+        }
+    }
+
+    list_entry_t* le = list_prev(&(base->page_link));
+    if (le != &free_list) {
+        p = le2page(le, page_link);
+        /*LAB2 EXERCISE 2: YOUR CODE*/ 
+        // 编写代码
+        // 1、判断前面的空闲页块是否与当前页块是连续的，如果是连续的，则将当前页块合并到前面的空闲页块中
+        // 2、首先更新前一个空闲页块的大小，加上当前页块的大小
+        // 3、清除当前页块的属性标记，表示不再是空闲页块
+        // 4、从链表中删除当前页块
+        // 5、将指针指向前一个空闲页块，以便继续检查合并后的连续空闲页块
+        if (p + p->property == base) {
+            p->property += base->property;
+            ClearPageProperty(base);
+            list_del(&(base->page_link));
+            base = p;
+        }
+    }
+
+    le = list_next(&(base->page_link));
+    if (le != &free_list) {
+        p = le2page(le, page_link);
+        if (base + base->property == p) {
+            base->property += p->property;
+            ClearPageProperty(p);
+            list_del(&(p->page_link));
+        }
+    }
+}
 
 
 
