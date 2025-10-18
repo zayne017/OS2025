@@ -185,10 +185,15 @@ best_fit_free_pages(struct Page *base, size_t n) {
         }
     }
 }
+//先初始化释放的页，检查页既不是保留页也不是空闲页，清除页标志位，将页引用计数设为0。
+ 再设置释放页块属性，按地址顺序插入空闲链表，遍历链表找到合适位置按地址升序插入。
+ 最后合并相邻空闲块：
+ 分别检查与前一个页块是否连续，与后一个页块是否连续
 ```
 将pmm.c中的pmm_manager更改为best_fit_pmm_manager，通过make grade测试，结果如下
 
 ![lab2](./lab2.png)
+
 
 
 
