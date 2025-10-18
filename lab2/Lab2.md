@@ -160,7 +160,7 @@ best_fit_free_pages(struct Page *base, size_t n) {
     list_entry_t* le = list_prev(&(base->page_link));
     if (le != &free_list) {
         p = le2page(le, page_link);
-        /*LAB2 EXERCISE 2: YOUR CODE*/ 
+        /*LAB2 EXERCISE 2: 2301413*/ 
         // 编写代码
         // 1、判断前面的空闲页块是否与当前页块是连续的，如果是连续的，则将当前页块合并到前面的空闲页块中
         // 2、首先更新前一个空闲页块的大小，加上当前页块的大小
@@ -192,6 +192,7 @@ best_fit_free_pages(struct Page *base, size_t n) {
 ```
 改进空间：
 1、可以使用桶排序等其他思路扫描整个链表而非线性查找。
+
 2、可以对不同请求进行筛选从而使用不同的策略执行来降低复杂度。
 
 
@@ -199,6 +200,7 @@ best_fit_free_pages(struct Page *base, size_t n) {
 将pmm.c中的pmm_manager更改为best_fit_pmm_manager，通过make grade测试，结果如下
 
 ![lab2](./lab2.png)
+
 
 
 
