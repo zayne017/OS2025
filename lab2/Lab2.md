@@ -124,7 +124,7 @@ best_fit_alloc_pages(size_t n) {
 
 **best_fit_free_pages**:
 
-
+```
 static void
 best_fit_free_pages(struct Page *base, size_t n) {
     assert(n > 0);
@@ -185,6 +185,7 @@ best_fit_free_pages(struct Page *base, size_t n) {
         }
     }
 }
+```
 
 
 
