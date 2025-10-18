@@ -186,9 +186,10 @@ best_fit_free_pages(struct Page *base, size_t n) {
     }
 }
 ```
-将pmm.c中的pmm_manager更改为best_fit_pmm_manager，通过make grade测试
+将pmm.c中的pmm_manager更改为best_fit_pmm_manager，通过make grade测试，结果如下
 
 ![](./lab2/lab2.png)
+
 
 
 
