@@ -84,6 +84,43 @@ best_fit_init_memmap(struct Page *base, size_t n) {
 ```
 
 **best_fit_alloc_pages**:
+```c
+best_fit_alloc_pages(size_t n) {
+    assert(n > 0);
+    if (n > nr_free) {
+        return NULL;
+    }
+    struct Page *page = NULL;
+    list_entry_t *le = &free_list;
+    size_t min_size = nr_free + 1;
+    
+    /*LAB2 EXERCISE 2: 2311008*/ 
+    // 下面的代码是first-fit的部分代码，请修改下面的代码改为best-fit
+    // 遍历空闲链表，查找满足需求的空闲页框
+    // 如果找到满足需求的页面，记录该页面以及当前找到的最小连续空闲页框数量
+    while ((le = list_next(le)) != &free_list) {
+        struct Page *p = le2page(le, page_link);
+        if (p->property >= n && p->property < min_size) {
+            page = p;
+            min_size = p->property;
+        }
+    }
+
+    if (page != NULL) {
+        list_entry_t* prev = list_prev(&(page->page_link));
+        list_del(&(page->page_link));
+        if (page->property > n) {
+            struct Page *p = page + n;
+            p->property = page->property - n;
+            SetPageProperty(p);
+            list_add(prev, &(p->page_link));
+        }
+        nr_free -= n;
+        ClearPageProperty(page);
+    }
+    return page;
+}
+```
 
 **best_fit_free_pages**:
 
