@@ -193,9 +193,288 @@ best_fit_free_pages(struct Page *base, size_t n) {
 ![lab2](./lab2.png)
 
 **改进空间**
+
 我们认为：
 1. 可以考虑维护一个块大小的二级索引最小堆，这样在查找满足最小页面时，能将分配时间复杂度降低到$O(logn)$，原时间复杂度为$O(n)$。不过，这增加了空间复杂度和实现难度。
 2. 使用内存回收策略，提高内存的利用率。
+# Challenge 1 buddy system（伙伴系统）分配算法
+
+Buddy System算法把系统中的可用存储空间划分为存储块(Block)来进行管理, 每个存储块的大小必须是2的n次幂(Pow(2, n)), 即1, 2, 4, 8, 16, 32, 64, 128...
+
+伙伴分配的实质就是一种特殊的“分离适配”，即将内存按2的幂进行划分，相当于分离出若干个块大小一致的空闲链表，搜索该链表并给出同需求最佳匹配的大小。其优点是快速搜索合并（O(logN)时间复杂度）以及低外部碎片（最佳适配best-fit）；其缺点是内部碎片，因为按2的幂划分块，如果碰上66单位大小，那么必须划分128单位大小的块。但若需求本身就按2的幂分配，比如可以先分配若干个内存池，在其基础上进一步细分就很有吸引力了。
+
+这里用多层的链表实现，`free_area_t` 用于管理每个阶层的空闲内存块链表和空闲块数量，`MAX_ORDER` 表示内存块的最大阶层，最大是11层，即4096B。
+
+**1.初始化指定阶层的空闲内存块链表，以及整个buddy system**
+
+```
+// 初始化指定阶层的空闲内存块链表
+static void init_free_area(int order)
+{
+    list_init(&(free_area[order].free_list));  // 初始化链表为空
+    free_area[order].nr_free = 0;              // 空闲块数量初始化为0
+}
+
+// 初始化整个伙伴系统，初始化所有阶层的空闲内存块链表
+static void buddy_system_init(void)
+{
+    for (int i = 0; i < MAX_ORDER; i++)
+    {
+        init_free_area(i);  // 调用init_free_area初始化每一阶层
+    }
+}
+```
+
+**2.初始物理内存映射，将物理内存页加入到伙伴系统管理中**
+
+具体是将从base开始的n页进行初始化，首先遍历每个页并清除标志属性，设置引用计数为0，之后初始化偏移量，再通过while循环，根据剩余页数计算需要分配的内存块的阶层，然后初始化，循环直到分配结束。
+
+```
+// 初始化物理内存映射，将物理内存页加入到伙伴系统管理中
+static void buddy_system_init_memmap(struct Page* base, size_t n)
+{
+    assert(n > 0);  
+    struct Page* p = base;
+
+    // 遍历每个页，清除属性和引用计数，确保页被释放
+    for (; p != base + n; p++)
+    {
+        assert(PageReserved(p));     // 页必须被保留
+        p->flags = p->property = 0;  // 清除页的标志和属性
+        set_page_ref(p, 0);          // 设置引用计数为0
+    }
+
+    size_t offset = 0;// 初始化偏移量
+    
+    // 开始处理每一个页，将其按大小加入伙伴系统
+    while (n > 0)
+    {
+        uint32_t order = 0;  // 用来表示当前块的阶层（2的幂次方的页数）
+        // 根据剩余的页数，计算需要分配的内存块的阶层（最大阶层为MAX_ORDER）
+        while ((1 << order) <= n && order < MAX_ORDER) { order += 1; }
+        if (order > 0) { order -= 1; }  // 将阶层减1，以确保不会超出可分配的最大块大小
+
+        // 获取当前页面，并设置其大小属性
+        p = base + offset;  // 计算当前页的地址
+        p->property = 1 << order;// 设置当前页面的大小为2的阶层次方
+        SetPageProperty(p);// 标记页面的属性为已使用
+        
+        // 将该页面加入到对应阶层的空闲链表中
+        list_add(&(free_list(order)), &(p->page_link));
+        nr_free(order) += 1;// 增加该阶层的空闲块数量
+
+        offset += (1 << order);
+        n -= (1 << order);
+    }
+}
+```
+
+**3.内存块拆分**
+
+将较大的内存块拆分为两个较小的块，并将这些较小的块添加到相应的空闲链表中，以便之后使用。这个操作通常发生在内存分配时，系统发现当前空闲块比所需的内存块大，因此需要拆分它。
+
+具体是通过递归调用 `split_page(order + 1)`进行拆分，如果即使经过递归拆分后，`free_list(order)` 仍然为空，说明系统已经无法进一步拆分更多的内存块，此时函数直接返回，表示没有足够的空闲块可用。
+
+拆分过程中，首先获取当前阶层的第一个空闲块并拆分，将拆分后的两个块（`page` 和 `buddy`）添加到较小的阶层的空闲链表中，再更新空闲块的数量。
+
+```
+// 将较大的内存块拆分为两个较小的块
+static void split_page(int order)
+{
+    assert(order > 0 && order < MAX_ORDER);// 确保 order 在有效范围内：不能为 0，且小于最大阶层 MAX_ORDER
+
+    if (list_empty(&(free_list(order)))) { split_page(order + 1); }// 如果当前阶层的空闲链表为空，递归拆分更大的阶层
+
+    if (list_empty(&(free_list(order)))) { return; }// 如果当前阶层的空闲链表仍然为空，说明无法拆分，直接返回
+
+    list_entry_t* le   = list_next(&(free_list(order)));// 获取当前阶层空闲链表的第一个空闲块
+    struct Page*  page = le2page(le, page_link);// 将链表条目转换为页面结构体
+    
+    list_del(&(page->page_link));// 从当前阶层的空闲链表中删除该页面
+    nr_free(order) -= 1;// 更新该阶层空闲块的数量
+
+    uint32_t size  = 1 << (order - 1);// 计算拆分后每个块的大小：size = 2^(order - 1)
+    struct Page* buddy = page + size;// 获取拆分后的另一个伙伴块
+    // 为拆分后的两个内存块（page 和 buddy）设置 property 标记这两个页面为有效
+    page->property  = size;
+    buddy->property = size;
+    SetPageProperty(page);
+    SetPageProperty(buddy);
+    // 将拆分出来的两个块加入到较小的阶层空闲链表中
+    list_add(&(free_list(order - 1)), &(page->page_link));
+    list_add(&(free_list(order - 1)), &(buddy->page_link));
+    nr_free(order - 1) += 2;// 更新该阶层空闲块的数量：当前阶层增加两个空闲块
+}
+```
+
+**4.分配内存页**
+
+根据请求的内存大小n找到适当大小的内存块，必要时将更大的内存块拆分成更小的块，最终从空闲链表中分配合适的内存块。
+
+检查请求是否超出最大限制，之后通过while循环计算所需最小阶层order，然后从order层开始查找空闲块，如果当前阶层没有空闲块，逐步向上查找更大的阶层。如果当前阶层的空闲块大于所需大小，则逐级拆分更大的内存块，直到找到合适大小的内存块，也就是回到当前需要的order层。之后从order层空闲链表中获取第一个空闲块，删除该块并返回给用户使用，更新链表和空闲块数量，最终返回已分配的内存块。
+
+```
+// 分配页面
+static struct Page* buddy_system_alloc_pages(size_t n)
+{
+    assert(n > 0);  // 确保要分配的页数大于0
+    if (n > (1 << (MAX_ORDER - 1)))
+    {                 // 请求的页数超过最大块大小
+        return NULL;  // 无法满足请求
+    }
+    struct Page* page = NULL;// 用来存储将分配的页面
+
+    // 计算需要的最小阶层
+    uint32_t order = 0;
+    while ((1 << order) < n && order < MAX_ORDER) { order += 1; }// 持续增加阶层直到满足内存请求
+    if (order >= MAX_ORDER) { return NULL; }// 如果计算出的阶层大于等于最大阶层，则返回 NULL，表示无法分配
+    uint32_t current_order = order;// 设置当前阶层为计算出来的阶层
+    // 查找当前阶层是否有空闲块，如果没有，则逐步向上查找更大的阶层
+    while (current_order < MAX_ORDER && list_empty(&(free_list(current_order)))) { current_order += 1; }
+
+    if (current_order == MAX_ORDER) { return NULL; }// 如果找到了最大阶层仍然没有可用的内存块，返回 NULL
+
+    // 如果 current_order 大于请求的阶层 order 逐级拆分，直到达到所需的阶层
+    while (current_order > order)
+    {
+        split_page(current_order);
+        current_order -= 1;
+    }
+
+    // 从空闲链表中获取块
+    list_entry_t* le = list_next(&(free_list(order)));
+    page = le2page(le, page_link);
+    list_del(&(page->page_link));// 将该页面从空闲链表中删除
+    nr_free(order) -= 1;// 更新当前阶层空闲块的数量，减少一个
+    ClearPageProperty(page);
+
+    return page;// 返回已分配的内存页面
+}
+```
+
+**5.合并相邻内存伙伴块**
+
+如果达到最高阶层，则直接将页面添加到空闲链表并结束递归，如果没有达到最高阶层，就通过`uintptr_t buddy_addr = addr ^ (size << PGSHIFT)`计算伙伴地址并转换回伙伴块指针，再检查伙伴块是否可以合并，如果可以合并就选择地址较小的块作为新的基地址，合并到更高一层，之后递归完成合并。
+
+```
+// 合并相邻的伙伴块
+static void merge_page(uint32_t order, struct Page* base)
+{
+    if (order >= MAX_ORDER - 1) // 如果当前阶已经达到或超过最大阶-1，说明无法继续向上合并
+    {
+        // 当达到最高阶层时，直接将页面添加回空闲链表
+        add_page(order, base);// 将块加入当前阶的空闲链表
+        nr_free(order) += 1;// 增加当前阶的空闲块计数
+        return;// 结束递归
+    }
+
+    size_t       size       = 1 << order;// 计算当前阶块的大小（以页为单位）
+    uintptr_t    addr       = page2pa(base);// 将页面指针转换为物理地址
+    uintptr_t    buddy_addr = addr ^ (size << PGSHIFT);// 计算伙伴块的物理地址：通过异或操作翻转对应位
+    struct Page* buddy      = pa2page(buddy_addr);// 将伙伴物理地址转换回页面指针
+
+    if (buddy->property != size || !PageProperty(buddy)) // 检查伙伴块是否满足合并条件
+    {
+        // 伙伴不可合并 直接将当前块加入空闲链表
+        add_page(order, base);
+        nr_free(order) += 1;// 增加当前阶空闲块计数
+        return;// 结束合并过程
+    }
+    // 伙伴可以合并，从当前阶层的空闲链表中移除伙伴块
+    list_del(&(buddy->page_link));
+    ClearPageProperty(buddy);
+    nr_free(order) -= 1;
+    // 选择地址较小的块作为新的基地址
+    if (buddy < base) { base = buddy; }// 如果伙伴地址更小，使用伙伴作为基地址
+    // 设置新的属性值
+    base->property = size << 1;
+    ClearPageProperty(base);
+    // 递归合并到更高阶层
+    merge_page(order + 1, base);
+}
+```
+
+**6.释放页面**
+
+判断页数必须是2的幂并不超过最大阶层，之后清除标志位和引用计数并设置空闲块，再计算对应阶层并通过`merge_page`进行递归的合并，如果释放后无法合并会直接加入对应层空闲链表，如果可以合并会与伙伴块合并直到无法合并。
+
+```
+// 合并相邻的伙伴块
+static void merge_page(uint32_t order, struct Page* base)
+{
+    if (order >= MAX_ORDER - 1) // 如果当前阶已经达到或超过最大阶-1，说明无法继续向上合并
+    {
+        // 当达到最高阶层时，直接将页面添加回空闲链表
+        add_page(order, base);// 将块加入当前阶的空闲链表
+        nr_free(order) += 1;// 增加当前阶的空闲块计数
+        return;// 结束递归
+    }
+
+    size_t       size       = 1 << order;// 计算当前阶块的大小（以页为单位）
+    uintptr_t    addr       = page2pa(base);// 将页面指针转换为物理地址
+    uintptr_t    buddy_addr = addr ^ (size << PGSHIFT);// 计算伙伴块的物理地址：通过异或操作翻转对应位
+    struct Page* buddy      = pa2page(buddy_addr);// 将伙伴物理地址转换回页面指针
+
+    if (buddy->property != size || !PageProperty(buddy)) // 检查伙伴块是否满足合并条件
+    {
+        // 伙伴不可合并 直接将当前块加入空闲链表
+        add_page(order, base);
+        nr_free(order) += 1;// 增加当前阶空闲块计数
+        return;// 结束合并过程
+    }
+
+    // 伙伴可以合并，从当前阶层的空闲链表中移除伙伴块
+    list_del(&(buddy->page_link));
+    ClearPageProperty(buddy);
+    nr_free(order) -= 1;
+
+    // 选择地址较小的块作为新的基地址
+    if (buddy < base) { base = buddy; }// 如果伙伴地址更小，使用伙伴作为基地址
+
+    // 设置新的属性值
+    base->property = size << 1;
+    ClearPageProperty(base);
+
+    // 递归合并到更高阶层
+    merge_page(order + 1, base);
+}
+```
+
+**7.检查伙伴系统是否正常运行**
+
+- 测试1：基础单页面分配 
+
+  分配一个页面，检查是否成功，并检查空闲页面数减少1。
+
+  然后释放该页面，检查空闲页面数是否恢复。
+
+- 测试2：非2的幂次方分配测试
+
+  请求3页，实际应该分配4页，并释放
+
+- 测试3：混合大小分配测试
+
+  验证不同大小的块能否正确分配，并验证乱序释放时，伙伴系统能否正确合并，检查是否稳
+
+- 测试4：边界情况测试
+
+  测试最大限制
+
+- 测试5：伙伴合并验证测试
+
+  分配两个相邻小块，之后检查伙伴块能否合并，并释放
+
+通过make qemu测试，最终当所有测试都通过时，说明：
+
+基本功能正常：能正确分配和释放内存
+
+内部碎片处理正确：非2幂请求能向上取整
+
+合并机制有效：小碎片能合并成大块
+
+边界情况安全：非法请求会被拒绝
+
+无内存泄漏：所有内存都能正确回收
 
 
 
