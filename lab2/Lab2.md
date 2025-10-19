@@ -476,8 +476,11 @@ static void merge_page(uint32_t order, struct Page* base)
 
 无内存泄漏：所有内存都能正确回收
 
+# Challenge：硬件的可用物理内存范围的获取方法
 
+如果 OS 无法提前知道当前硬件的可用物理内存范围，请问你有何办法让 OS 获取可用物理内存范围？
 
+# 知识点总结
 
 
 
