@@ -480,7 +480,13 @@ static void merge_page(uint32_t order, struct Page* base)
 
 如果 OS 无法提前知道当前硬件的可用物理内存范围，请问你有何办法让 OS 获取可用物理内存范围？
 
+机器上电后，首先运行 OpenSBI。OpenSBI 会进行非常底层的硬件初始化，并探测系统的硬件组成。OpenSBI 扮演了 bootloader 的角色。
+OpenSBI 根据探测到的硬件信息，在内存中生成一个 DTB 数据结构。
+OpenSBI 将控制权移交给操作系统内核时，它会遵循 RISC-V 的调用约定，将 DTB 在物理内存中的起始地址存放在 a1 寄存器中。
+操作系统的内核入口代码可以从 a1 寄存器中拿到 DTB 的地址，然后调用设备树解析器来读取。通过解析，内核就知道了物理内存的布局。
+
 # 知识点总结
+
 
 
 
