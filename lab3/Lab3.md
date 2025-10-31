@@ -6,6 +6,45 @@
 
 要求完成问题1提出的相关函数实现，提交改进后的源代码包（可以编译执行），并在实验报告中简要说明实现过程和定时器中断中断处理的流程。实现要求的部分代码后，运行整个系统，大约每1秒会输出一次”100 ticks”，输出10行。
 
+在trap.c前面添加#include<sbi.h>，之后在对应位置填写代码：
+
+```
+case IRQ_S_TIMER:
+             /* LAB3 EXERCISE1   YOUR CODE : 2213523 */
+            /*(1)设置下次时钟中断- clock_set_next_event()
+             *(2)计数器（ticks）加一
+             *(3)当计数器加到100的时候，我们会输出一个`100ticks`表示我们触发了100次时钟中断，同时打印次数（num）加一
+            * (4)判断打印次数，当打印次数为10时，调用<sbi.h>中的关机函数关机
+            */
+            clock_set_next_event();//下次中断
+            ticks++;
+            static int count = 0;//计数器
+                if (ticks == 100) {    
+                print_ticks();
+                ticks = 0;  //重置计数器
+                count++;}
+                if (count == 10) {
+                sbi_shutdown();}//输出十行后关闭
+```
+
+首先通过调用clock_set_next_event()设置下次中断，再将计数器加一，count表示打印次数，当计数器加到100的时候，会输出一个100ticks表示触发了100次时钟中断，同时打印次数加一，当打印次数为10时调用sbi_shutdown()关闭。
+
+定时器中断处理流程：
+
+1.首先进行时钟初始化，当操作系统启动时，clock_init() 函数会被调用，`set_csr(sie, MIP_STIP);`用于开始使能时钟中断，`clock_set_next_event();`设置第一次时钟中断，`ticks = 0;`初始化全局中断计数器
+
+2.中断触发，`clock_set_next_event()`设置第一次中断，触发中断， CPU 接收到信号，发现是 `IRQ_S_TIMER`，于是暂停当前工作，跳转到 `interrupt_handler` 处理
+
+3.中断处理，CPU 进入 `interrupt_handler` 函数：
+
+1）`switch (cause)`：CPU 通过 `cause` 寄存器判断出中断类型是 `IRQ_S_TIMER`（S模式时钟中断）。
+
+2）`case IRQ_S_TIMER:` 分支被执行，运行刚刚的代码处理中断
+
+3）中断返回，`case` 执行完毕，`interrupt_handler` 返回，CPU 恢复现场，返回到被中断前的地方继续执行。
+
+4.循环，每秒100次时钟中断，触发每次时钟中断后，设置10ms后触发下一次时钟中断，之后再次重复中断触发和中断处理过程，每触发100次时钟中断（1秒钟）输出一行信息到控制台，直到输出十行100ticks，调用关机函数关机。
+
 ## 扩展练习 Challenge1：描述与理解中断流程
 
 回答：描述ucore中处理中断异常的流程（从异常的产生开始），其中mov a0，sp的目的是什么？SAVE_ALL中寄寄存器保存在栈中的位置是什么确定的？对于任何中断，__alltraps 中都需要保存所有寄存器吗？请说明理由。
@@ -70,6 +109,7 @@ break;
 ![lab2](./lab3_1.png)
 
 ## 知识点总结
+
 
 
 
