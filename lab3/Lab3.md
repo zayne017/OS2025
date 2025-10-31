@@ -35,13 +35,12 @@ asm("ebreak");
 这里本来直接都用tf->epc+=4来更新，但是在测试ebreak的时候出现问题，在输出断点异常后又去执行后面的print_trapframe(tf)打印了所有的寄存器，查询发现ebreak是一个压缩指令只有2字节，这样epc更新到错误的地方就会进入default，解决方法可以是在前面添加一个判断指令长度的函数，然后根据实际指令长度更新epc的值：
 
 ```
-static inline int get_inst_len(uintptr_t pc) 
-{
-    uint16_t inst = *(uint16_t *)pc;
-    //把地址强制转换为指向16位整数的指针并解引用 读取地址的前2位
-    return ((inst & 0x3) == 0x3) ? 4 : 2;
-    //0x3的二进制是11 如果最低2位是11则为4字节标准指令，反之为2字节压缩指令
-}
+static inline int get_inst_len(uintptr_t pc) {
+uint16_t inst = *(uint16_t *)pc;
+//把地址强制转换为指向16位整数的指针并解引用 读取地址的前2位
+return ((inst & 0x3) == 0x3) ? 4 : 2;
+//0x3的二进制是11 如果最低2位是11则为4字节标准指令，反之为2字节压缩指令}
+
 case CAUSE_ILLEGAL_INSTRUCTION:
 // 非法指令异常处理
 /* LAB3 CHALLENGE3   YOUR CODE : 2213523 */
@@ -68,7 +67,8 @@ break;
 
 修改后一切正常，执行qemu后结果如下：
 
-
+![](屏幕截图 2025-10-31 170156.png)
 
 ## 知识点总结
+
 
