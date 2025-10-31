@@ -53,6 +53,47 @@ case IRQ_S_TIMER:
 
 回答：在trapentry.S中汇编代码 csrw sscratch, sp；csrrw s0, sscratch, x0实现了什么操作，目的是什么？save all里面保存了stval scause这些csr，而在restore all里面却不还原它们？那这样store的意义何在呢？
 
+### 问题一 操作目的
+```
+csrw sscratch, sp
+```
+将当前sp保存到sscratch寄存器。
+目的是在异常发生时，立即将当前栈指针(sp)保存到sscratch寄存器。因为异常处理需要使用新的栈空间，但需要记住原来的栈位置以便恢复
+
+```
+csrrw s0, sscratch, x0   
+```
+将sscratch的值读到s0，同时将sscratch清零,x0是零寄存器
+这是一个原子操作，避免多线程环境下的竞争条件
+可以用一个伪代码解释这样设计的目的
+```c
+original_sp = sscratch;    // 保存原始sp
+sscratch = 0;              // 标记"当前在内核模式"
+if (sscratch == 0) {
+    // 异常发生在内核模式，使用当前内核栈
+} else {
+    // 异常发生在用户模式，sscratch保存了用户栈指针
+    // 需要切换到内核栈
+}
+```
+
+### 问题二 CSR
+scause是只读寄存器​​，记录异常原因，处理完即失效，因此不需要恢复。
+​sbadaddr (stval)是只读寄存器​​，记录异常相关地址（如缺页地址）、一次性信息，因此不需要恢复。
+首先，当异常中断发生时，这些寄存器记录的内容对调试很重要（可以直接打印出来）。
+其次，他们也参与到中断处理的决策中，在trap.c中
+```
+void interrupt_handler(struct trapframe *tf) {
+    intptr_t cause = (tf->cause << 1) >> 1;
+    switch (cause) {
+            .......//省略
+            break;
+    }
+}
+```
+根据保存的scause来进行决策
+
+
 ## 扩展练习Challenge3：完善异常中断
 
 
