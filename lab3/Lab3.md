@@ -207,10 +207,10 @@ if (sscratch == 0) {
 ```
 
 ### 问题二 CSR
-scause是只读寄存器​​，记录异常原因，处理完即失效，因此不需要恢复。
+scause是只读寄存器​​，记录中断异常原因，处理完即失效，因此不需要恢复。
 ​sbadaddr (stval)是只读寄存器​​，记录异常相关地址（如缺页地址）、一次性信息，因此不需要恢复。
 首先，当异常中断发生时，这些寄存器记录的内容对调试很重要（可以直接打印出来）。
-其次，他们也参与到中断处理的决策中，在trap.c中
+其次，他们也参与到异常中断处理的决策中，在trap.c中
 ```
 void interrupt_handler(struct trapframe *tf) {
     intptr_t cause = (tf->cause << 1) >> 1;
@@ -220,7 +220,7 @@ void interrupt_handler(struct trapframe *tf) {
     }
 }
 ```
-根据保存的scause来进行决策
+根据scause确定是中断还是异常，如果是中断，还能确定具体的中断类型
 
 
 ## 扩展练习Challenge3：完善异常中断
