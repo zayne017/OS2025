@@ -156,12 +156,7 @@ void exception_handler(struct trapframe *tf) {
      * 2. 回到汇编代码__trapret标签
      * 3. RESTORE_ALL从栈中恢复所有寄存器(包括修改后的epc)
      * 4. sret指令跳转到epc指向的地址恢复执行
-     * 
-     * EPC管理策略总结:
-     * - 可恢复异常: epc += 4 跳过当前指令
-     * - 需重试异常: 保持epc不变，重试当前指令(如缺页处理)
-     * - 严重异常: 可能终止进程，不返回
-     */
+*/
 }
 6、恢复阶段（__trapret）
   __trapret:
@@ -284,6 +279,7 @@ break;
 ![lab2](./lab3_1.png)
 
 ## 知识点总结
+
 
 
 
