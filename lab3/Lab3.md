@@ -49,6 +49,140 @@ case IRQ_S_TIMER:
 
 回答：描述ucore中处理中断异常的流程（从异常的产生开始），其中mov a0，sp的目的是什么？SAVE_ALL中寄寄存器保存在栈中的位置是什么确定的？对于任何中断，__alltraps 中都需要保存所有寄存器吗？请说明理由。
 
+### 问题一 处理中断流程
+```
+1、CPU检测到异常或中断事件，自动保存现场到CSR寄存器：
+ sepc ← 当前PC（异常返回地址）
+ scause ← 异常原因编码（最高位：0=异常，1=中断）
+ stval ← 附加信息（如缺页地址、非法指令值）
+ sstatus ← 状态信息（SPP位记录先前模式），跳转到stvec寄存器指向的异常向量表
+2、
+    SAVE_ALL        # 保存完整上下文到栈
+    move a0, sp     # 传递trapframe指针给C函数
+    jal trap        # 跳转到C语言分发器
+SAVE_ALL保存内容：所有通用寄存器 x0-x31，4个关键CSR：sstatus, sepc, sbadaddr, scause，栈帧构成完整的struct trapframe
+3、中断和异常区分（trap.c）
+void trap(struct trapframe *tf) {
+    trap_dispatch(tf);  // 核心分发函数
+}
+static inline void trap_dispatch(struct trapframe *tf) {
+    // 根据scause最高位区分中断和异常
+    if ((intptr_t)tf->cause < 0) {
+        interrupt_handler(tf);    // 中断处理
+    } else {
+        exception_handler(tf);    // 异常处理
+    }
+}
+4、中断处理流程（interrupt_handler）
+case IRQ_S_TIMER:  //  supervisor timer interrupt
+            // 1. 设置下次时钟中断
+            clock_set_next_event();
+            // 2. 更新系统时钟滴答
+            ticks++;
+            // 3. 每100个ticks打印信息
+            static int count = 0;
+            if (ticks % TICK_NUM == 0) {
+                print_ticks();
+                count++;
+            }
+            // 4. 打印10次后关机
+            if (count == 10) {
+                sbi_shutdown();
+            }
+            break;
+5. 异常处理流程（exception_handler）
+void exception_handler(struct trapframe *tf) {
+    switch (tf->cause) {
+        case CAUSE_ILLEGAL_INSTRUCTION:
+             * 处理逻辑:
+             * 1. 打印异常类型和出错位置
+             * 2. 通过tf->epc += 4跳过当前非法指令
+            cprintf("Exception type: Illegal instruction\n");
+            cprintf("Illegal instruction caught at 0x%08x\n", tf->epc);
+            tf->epc += 4;  // 跳过非法指令，继续执行下一条
+            break;
+        case CAUSE_BREAKPOINT:
+             * 1. 识别并打印断点信息
+             * 2. 跳过ebreak指令继续执行
+             * 3. 在实际调试器中会在此暂停执行并进入调试状态
+            cprintf("Exception type: breakpoint\n");
+            cprintf("Breakpoint at 0x%08x\n", tf->epc);
+            tf->epc += 4;  // 跳过断点指令
+            break; 
+        case CAUSE_MISALIGNED_FETCH:
+             * 取指地址不对齐异常
+             * 触发场景: 指令地址不是4字节对齐的(如0x1001)
+             * 当前实现: 预留处理接口
+            break;
+        case CAUSE_FAULT_FETCH:
+             * 取指错误异常  
+            break;  
+        case CAUSE_MISALIGNED_LOAD:
+             * 加载地址不对齐异常
+             * 示例: lw x1, 0x1001(x0) - 地址0x1001不是4字节对齐
+             * 当前实现: 预留处理接口  
+            break;  
+        case CAUSE_FAULT_LOAD:
+             * 加载错误异常
+             * - 加载地址无效(如空指针访问)
+             * - 页面错误(缺页异常)  
+             * - 权限不足(读取只写内存)
+             * 示例: int value = *((int*)0); // 访问空指针
+             * 当前实现: 预留处理接口
+            break;   
+        case CAUSE_MISALIGNED_STORE: 
+             * 存储地址不对齐异常
+             * 触发场景: 存储指令(sw/sh/sb)地址不符合对齐要求  
+             * 示例: sw x1, 0x1001(x0) - 地址0x1001不是4字节对齐
+             * 当前实现: 预留处理接口
+             */
+            // 内存访问异常处理 - 待实现
+            break;
+        case CAUSE_FAULT_STORE:
+             * 存储错误异常
+             * 示例: *((int*)0) = 123; // 写入空指针
+             * 当前实现: 预留处理接口
+            break;
+        case CAUSE_SUPERVISOR_ECALL:
+             * 监督模式系统调用异常
+            break;
+        default:
+            print_trapframe(tf);  // 未知异常，打印详细信息
+            break;
+    }
+    /*
+     * 函数返回后执行流程:
+     * 1. 返回到trap_dispatch() → trap()
+     * 2. 回到汇编代码__trapret标签
+     * 3. RESTORE_ALL从栈中恢复所有寄存器(包括修改后的epc)
+     * 4. sret指令跳转到epc指向的地址恢复执行
+     * 
+     * EPC管理策略总结:
+     * - 可恢复异常: epc += 4 跳过当前指令
+     * - 需重试异常: 保持epc不变，重试当前指令(如缺页处理)
+     * - 严重异常: 可能终止进程，不返回
+     */
+}
+6、恢复阶段（__trapret）
+  __trapret:
+     RESTORE_ALL   # 从栈中恢复所有寄存器
+      sret          # 返回到异常前状态
+  恢复sstatus ← 保存的状态，恢复sepc ← 返回地址（可能被异常处理修改），恢复所有通用寄存器，sret指令返回到sepc指向的地址
+```
+### 问题二
+mov a0，sp的目的是什么？SAVE_ALL中寄寄存器保存在栈中的位置是什么确定的？对于任何中断，__alltraps 中都需要保存所有寄存器吗？
+```
+move a0, sp的目的
+目的：将栈指针sp的值作为参数传递给trap函数。在SAVE_ALL之后，sp指向保存的trapframe结构体，trapframe包含了所有寄存器的保存值，是异常处理的上下文，通过move a0, sp将trapframe指针作为第一个参数（a0寄存器）传递给trap函数，这样在C代码中就可以通过struct trapframe *tf参数来访问和修改寄存器状态
+
+SAVE_ALL中寄存器栈位置确定方式：
+按照预定义的偏移量顺序排列
+
+需要保存所有寄存器，理由如下：
+异常处理程序不知道具体是哪种异常/中断，必须为所有可能的异常类型做好准备。某些异常处理可能需要修改寄存器值（如系统调用），异常返回时必须完全恢复执行现场，缺少任何寄存器都会导致程序状态不一致。嵌套异常处理：在处理一个异常时可能发生另一个异常，完整的上下文保存确保嵌套异常能正确处理。
+
+```
+
 ## 扩展练习 Challenge2：理解上下文切换机制
 
 回答：在trapentry.S中汇编代码 csrw sscratch, sp；csrrw s0, sscratch, x0实现了什么操作，目的是什么？save all里面保存了stval scause这些csr，而在restore all里面却不还原它们？那这样store的意义何在呢？
@@ -150,6 +284,7 @@ break;
 ![lab2](./lab3_1.png)
 
 ## 知识点总结
+
 
 
 
