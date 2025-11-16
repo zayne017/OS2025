@@ -20,9 +20,82 @@ alloc_proc函数（位于kern/process/proc.c中）负责分配并返回一个新
 - 唤醒新进程
 - 返回新进程号
 
-请在实验报告中简要说明你的设计实现过程。请回答如下问题：
+请在实验报告中简要说明你的设计实现过程。
+
+`do_fork`函数用来完成具体内核线程的创建工作，主要完成下面7件事：
+
+1.首先调用练习1写的 `alloc_proc()`，获取一个 `proc_struct` 结构体，如果分配失败则返回 `NULL`，然后 `goto fork_out` 。并将新进程 `proc` 的 `parent` 字段指向 `current`，即`idleproc`。
+
+```
+    // LAB4:EXERCISE2 2213523
+    //    1. call alloc_proc to allocate a proc_struct
+    if ((proc = alloc_proc()) == NULL) {
+    goto fork_out;
+}
+    // 将新进程的父进程设置为当前进程
+    proc->parent = current; 
+```
+
+2.分配内核栈，调用 `setup_kstack`，它会分配 `KSTACKPAGE` 个物理页，并将其虚拟地址存入 `proc->kstack`，如果内存不足则跳转到 `bad_fork_cleanup_proc`。
+
+```
+    //    2. call setup_kstack to allocate a kernel stack for child process
+    if (setup_kstack(proc) != 0) {
+    goto bad_fork_cleanup_proc;
+}
+```
+
+3.复制原进程的内存管理信息到新进程，因为这里是内核线程，copy_mm函数目前只是把current->mm设置为NULL，在后续实验中，这里会根据 `clone_flags` 决定是复制（`fork`）还是共享（`clone`）用户地址空间，如果 `copy_mm` 失败，则跳转到 `bad_fork_cleanup_kstack`。
+
+```
+    //    3. call copy_mm to dup OR share mm according clone_flag
+    if (copy_mm(clone_flags, proc) != 0) {
+    goto bad_fork_cleanup_kstack;
+}
+```
+
+4.复制原进程上下文到新进程，调用 `copy_thread`，传入新进程 `proc`、`stack` (为0) 和 `tf` ， `copy_thread`函数给子进程分配空间，并复制中断帧`tf`，再将`a0`返回值设置为0，将返回地址`ra`设置到`forkret`并设置内核栈指针`sp`到`tf`
+
+```
+    //    4. call copy_thread to setup tf & context in proc_struct
+    copy_thread(proc, stack, tf);
+```
+
+5.将新进程添加到进程列表，首先调用 `get_pid()` 获取一个保证唯一的PID，再将 `proc` 添加到哈希表`hash_list`中，接着将 `proc`添加到全局进程列表`proc_list`，并`nr_process++`将进程总数+1。
+
+```
+    //    5. insert proc_struct into hash_list && proc_list
+    proc->pid = get_pid(); // 获取唯一的PID
+    hash_proc(proc);       // 添加到哈希列表
+    // 添加到全局进程列表
+    list_add(&proc_list, &(proc->list_link)); 
+    nr_process++;
+```
+
+6.唤醒新进程，将进程状态从 `PROC_UNINIT` 修改为 `PROC_RUNNABLE`， `schedule()` 函数现在可以选中这个进程来运行了。
+
+```
+    //    6. call wakeup_proc to make the new child process RUNNABLE
+    //wakeup_proc 的作用是设置状态
+    proc->state = PROC_RUNNABLE; 
+```
+
+7.返回新进程号，将返回值 `ret` 从 `-E_NO_MEM` 覆盖为新进程的 `pid`。
+
+```
+    //    7. set ret vaule using child proc's pid
+    ret = proc->pid;
+```
+
+这样，我们的内核进程initproc就创建完毕了，等待开始运行。
+
+请回答如下问题：
 
 - 请说明ucore是否做到给每个新fork的线程一个唯一的id？请说明你的分析和理由。
+
+uCore 能够确保每个新 fork 的线程都获得一个唯一的 ID，因为proc.c中的 `get_pid()` 函数，可以用来分配唯一的id。
+
+在函数中，last_pid用于记录上次分配的 PID，next_safe用于记录下一个 已知的被占用的 PID，首先尝试下一个 PID，将`last_pid` 加 1，如果 `last_pid` 超过了最大值，会回绕到 1并goto inside。之后检查新选的 `last_pid` 是否“撞”上了 `next_safe` 缓存，如果小于则可以返回，如果大于等于则需要再判断。首先`next_safe` 重置为最大值，再重新扫描链表，遍历`proc_list` 上的每一个进程，如果发现选择的 `last_pid`已经被占用，则尝试递增 `last_pid` 并从头重新开始整个扫描（`goto repeat`），直到找到一个确认未被占用的PID为止，这样可以保证每个新 fork 的线程都获得一个唯一的 ID。
 
 ## 练习3：编写proc_run 函数（需要编码）
 
@@ -54,3 +127,4 @@ get_pte()函数（位于`kern/mm/pmm.c`）用于在页表中查找或创建页�
 - get_pte()函数中有两段形式类似的代码， 结合sv32，sv39，sv48的异同，解释这两段代码为什么如此相像。
 
 - 目前get_pte()函数将页表项的查找和页表项的分配合并在一个函数里，你认为这种写法好吗？有没有必要把两个功能拆开？
+
