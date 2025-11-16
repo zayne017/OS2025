@@ -128,3 +128,36 @@ get_pte()函数（位于`kern/mm/pmm.c`）用于在页表中查找或创建页�
 
 - 目前get_pte()函数将页表项的查找和页表项的分配合并在一个函数里，你认为这种写法好吗？有没有必要把两个功能拆开？
 
+## 总结
+
+虽然执行make qemu后只输出了几行cprintf，但是整个过程中操作系统内核完成了复杂的线程创建和交接，下面是简化的执行过程：
+
+1.`kern_init`启动内核，执行一系列初始化，调用 `proc_init()`创建了第一个线程`idleproc`
+
+2.`proc_init`继续执行，调用 `kernel_thread(init_main, "Hello world!!", 0)`伪造了一些寄存器，创建第二个线程 `initproc`，调用`do_fork`完成具体内核线程的创建工作，之后`proc_init` 执行完毕，返回到 `kern_init`。
+
+3.`kern_init` 的所有初始化工作完成后调用 `cpu_idle()`，判断`current->need_resched`是1，调度器`schedule()`触发。
+
+4.调度器 `schedule`通过遍历 `proc_list`找到 `initproc`，将状态设置为`PROC_RUNNABLE`，并运行`proc_run(next)`（即 `proc_run(initproc)`）。
+
+5.`proc_run` 执行切换，调用`switch_to`进行线程的切换，`ret` 指令使 CPU 跳转到 `ra`即 `forkret`，调用`forkrets`将 `sp` 设置为 `initproc` 的 `tf` 地址，再跳转到`__trapret`恢复伪造的寄存器，之后`sret`从中断返回，使 CPU 跳转到 `epc`即 `kernel_thread_entry`，将a0设置为s1，即参数`"Hello world!!"`，跳转到s0即`init_main`，并设置 `ra` = `jal do_exit`。
+
+6.`init_main`开始运行，打印输出，返回到`do_exit`。
+
+**知识点**：
+
+1.进程控制块 (PCB) `struct proc_struct` 
+
+2.进程状态模型 实验中进程状态有四种， `enum proc_state` ( `PROC_UNINIT`, `PROC_RUNNABLE`, `PROC_SLEEPING`, `PROC_ZOMBIE` ) 实验中的就绪态同时包含了理论上的就绪态和运行态，而未初始化态则对应 `alloc_proc` 之后、`do_fork` 完成之前时的中间态。
+
+3.`do_fork()` 函数创建进程，本次实验都是在内核态完成。
+
+4.进程调度与分派 `schedule()` (调度器) 负责决策和 `proc_run()` (分派器)负责执行。实验目前没有实现理论的时间片轮转，选中了哪个线程就独占CPU直到退出。
+
+5.上下文切换  `switch_to()` 函数和 `struct context` 实验中只要手动保存被调用者保存寄存器即可。
+
+6.内核栈与中断帧，区分`context` 和 `tf` 。
+
+7.进程地址空间
+
+
