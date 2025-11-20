@@ -104,25 +104,7 @@ alloc_proc(void)
          *       uint32_t flags;                             // Process flag
          *       char name[PROC_NAME_LEN + 1];               // Process name
          */
-        proc->state = PROC_UNINIT;                 // 状态：未初始化
-        proc->pid = -1;                            // PID：无效/未分配
-        proc->runs = 0;
-        proc->kstack = 0;
-        proc->need_resched = 0;
-        proc->parent = NULL;
-        proc->mm = NULL;
-        memset(&(proc->context), 0, sizeof(struct context)); // 上下文清零
-        proc->tf = NULL;
-
-        // 关键：根据 proc_init 的检查，
-        // pgdir 必须指向内核页目录，因为所有内核线程共享此页目录
-        proc->pgdir = boot_pgdir_pa;               
-
-        proc->flags = 0;
-        memset(proc->name, 0, PROC_NAME_LEN + 1);  // 进程名清零
-
-        // list_link 和 hash_link 不需要在这里初始化
-        // 它们将在被插入到 list (list_add) 时自动被设置
+       
     }
     return proc;
 }
@@ -202,15 +184,7 @@ void proc_run(struct proc_struct *proc)
          *   lsatp():                   Modify the value of satp register
          *   switch_to():              Context switching between two processes
          */
-        bool intr_flag;              
-        struct proc_struct *from = current;    
-        local_intr_save(intr_flag);    
-        {
-            current = proc;                   
-            lsatp(proc->pgdir);        
-            switch_to(&(from->context), &(proc->context));
-        }
-        local_intr_restore(intr_flag); 
+         
     }
 }
 
