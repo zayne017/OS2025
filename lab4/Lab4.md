@@ -108,9 +108,85 @@ proc_run用于将指定的进程切换到CPU上运行。它的大致执行步骤
 - 实现上下文切换。`/kern/process`中已经预先编写好了`switch.S`，其中定义了`switch_to()`函数。可实现两个进程的context切换。
 - 允许中断。
 
+
+
+1. 检查要切换的进程是否与当前正在运行的进程相同，如果相同则不需要切换。  
+```c
+if (proc != current)
+{
+    ...
+}
+```
+当 `proc == current` 时函数直接返回，不做任何操作，避免不必要的上下文切换开销。
+
+2. 禁用中断，保存并关闭中断。使用 `local_intr_save(x)` 保存并关闭中断，避免在切换过程中被中断打断。  
+```c
+bool intr_flag;
+local_intr_save(intr_flag);
+```
+`intr_flag` 用于保存调用前的中断使能状态，之后会用 `local_intr_restore(intr_flag)` 恢复原状态；在此范围内执行上下文切换可避免并发与抢占问题。
+
+3. 切换当前进程为要运行的进程，更新全局 `current` 指针。  
+```c
+struct proc_struct *prev = current;
+current = proc;
+```
+先把原来的 `current` 保存到 `prev`，再把 `current` 指向新的 `proc`，这样后续的切换操作和任何对 `current` 的查询都会看到新的进程。
+
+4. 切换页表，以便使用新进程的地址空间。使用 `lsatp((unsigned int)proc->pgdir)` 修改 SATP。  
+```c
+lsatp((unsigned int)proc->pgdir);
+```
+LSATP，或此处的 `lsatp` 辅助函数，将 SATP 寄存器设置为指定进程的页表基址，使 CPU 采用该进程的虚拟地址映射。通常在上下文切换前切换页表以确保新进程运行时的内存访问正确。
+
+5. 实现上下文切换。调用 `switch_to(&prev->context, &proc->context)`，由汇编例程在 `switch.S` 中完成实际寄存器与栈指针保存/恢复。  
+```c
+switch_to(&prev->context, &proc->context);
+```
+`switch_to` 会把当前（prev）进程的 callee-saved 寄存器和栈指针保存到 `prev->context`，并从 `proc->context` 恢复寄存器与栈，从而把 CPU 的执行上下文切换到新进程。
+
+6. 允许中断（恢复原中断状态）。使用 `local_intr_restore(x)` 恢复先前保存的中断状态。  
+对应代码：
+```c
+local_intr_restore(intr_flag);
+```
+恢复之前保存的中断使能标志。如果切换前中断是允许的，则恢复允许；如果之前禁用，则保持禁用，保证语义一致。
+
+完整的代码块如下
+```c
+void proc_run(struct proc_struct *proc)
+{
+    if (proc != current)
+    {
+        bool intr_flag;
+        struct proc_struct *prev = current;
+        local_intr_save(intr_flag);
+        {
+            current = proc;
+            lsatp((unsigned int)proc->pgdir);
+            switch_to(&prev->context, &proc->context);
+        }
+        local_intr_restore(intr_flag);
+    }
+}
+```
+
+另外：
+- 把 `lsatp` 放在 `switch_to` 之前，是为了保证当 CPU 恢复到新上下文并开始执行时，页表已经是新进程的页表，避免地址映射冲突或 TLB 问题。部分实现也可能在恢复后立即执行 `sfence.vma`，但本实验框架通过 `lsatp` 与后续指令保证一致性。
+- `local_intr_save`/`local_intr_restore` 的粒度应尽量小，只保护必要的上下文切换段，避免长时间禁中断影响系统响应。
+- `switch_to` 的实现细节由汇编完成。在 fork 场景中，`copy_thread` 已把 `proc->context` 的 `ra` 指向 `forkret`，所以子进程第一次被调度时会从 `forkret` 进入内核后续逻辑。
+
+
+
 请回答如下问题：
 
 - 在本实验的执行过程中，创建且运行了几个内核线程？
+
+按照 kern/process/proc_init() 的初始化流程，系统在引导时创建并运行的内核线程为**两**个：
+
+第一个内核线程：idleproc（idle）。proc_init() 通过 alloc_proc() 创建 idleproc，并把 current = idleproc，这是第一个、并且立即成为当前运行的内核线程。
+第二个内核线程：init_main（init）。proc_init() 调用 kernel_thread(init_main, "Hello world!!", 0) 来创建第二个内核线程；随后该线程会被调度并运行，initproc。
+因此，初始阶段创建并会被运行的内核线程数为 2，idle 与 init。
 
 完成代码编写后，编译并运行代码：make qemu
 ![lab4](./lab4.png)
