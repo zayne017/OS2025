@@ -26,7 +26,7 @@ alloc_proc函数（位于kern/process/proc.c中）负责分配并返回一个新
         
 9、初始化帧指针 proc->tf = NULL;
         
-10、初始化页目录基址 proc->pgdir = 0;
+10、初始化页目录基址 proc->pgdir = boot_pgdir_pa;
         
 11、初始化进程标志 proc->flags = 0;
         
@@ -336,6 +336,7 @@ get_pte()函数（位于`kern/mm/pmm.c`）用于在页表中查找或创建页�
 6.内核栈与中断帧，区分`context` 和 `tf` 。
 
 7.进程地址空间
+
 
 
 
