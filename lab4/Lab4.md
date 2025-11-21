@@ -33,7 +33,8 @@ alloc_proc函数（位于kern/process/proc.c中）负责分配并返回一个新
 12、初始化进程名称 memset(proc->name, 0, PROC_NAME_LEN + 1);
 
 struct context context：进程上下文保存结构，用于进程切换和恢复被调用者时保存寄存器。
-struct trapframe *tf：是帧结构，能保存进程在发生中断/异常时的完整CPU状态，处理完中断后，从陷阱帧恢复所有状态。
+
+struct trapframe *tf：中断帧的指针，总是指向内核栈的某个位置：当进程从用户空间跳到内核空间时，中断帧记录了进程在被中断前的状态。当内核需要跳回用户空间时，需要调整中断帧以恢复让进程继续执行的各寄存器值。
 void print_trapframe(struct trapframe *tf) {
     cprintf("trapframe at %p\n", tf);
     print_regs(&tf->gpr);          // 打印所有通用寄存器
@@ -229,6 +230,39 @@ void proc_run(struct proc_struct *proc)
 
 说明语句`local_intr_save(intr_flag);....local_intr_restore(intr_flag);`是如何实现开关中断的？
 
+在sync.h中定义一个内联函数 __intr_save保存当前中断状态并禁用中断
+
+static inline bool __intr_save(void) {
+    if (read_csr(sstatus) & SSTATUS_SIE) {
+        // 检查 sstatus 寄存器的 SIE 位是否为 1，表示中断是否启用
+        intr_disable();// 如果 SIE 位为 1，则调用 intr_disable 函数禁用中断
+        return 1;
+    }
+    return 0;
+}
+
+定义一个内联函数 __intr_restore来根据状态恢复中断
+
+static inline void __intr_restore(bool flag) {
+    if (flag) {// 检查 flag 参数是否为 true
+        intr_enable();// 如果 flag 为 true，则调用 intr_enable 函数重新启用中断
+    }
+}
+
+#define local_intr_save(x) \  //用于保存当前中断状态并禁用中断
+    do {                   \
+        x = __intr_save(); \  //调用 __intr_save 函数，将当前中断状态保存到变量 x 中，同时禁用中断
+    } while (0)
+#define local_intr_restore(x) __intr_restore(x);//定义一个宏 local_intr_restore，根据保存的状态 x 恢复中断
+
+void intr_enable(void) { set_csr(sstatus, SSTATUS_SIE); }
+
+void intr_disable(void) { clear_csr(sstatus, SSTATUS_SIE); }
+具体调用关系如下
+关中断local_intr_save --> __intr_save --> intr_disable --> cli
+
+开中断local_intr_restore–> __intr_restore --> intr_enable --> sti
+
 ## 扩展练习 Challenge2
 
 深入理解不同分页模式的工作原理（思考题）
@@ -300,6 +334,7 @@ get_pte()函数（位于`kern/mm/pmm.c`）用于在页表中查找或创建页�
 6.内核栈与中断帧，区分`context` 和 `tf` 。
 
 7.进程地址空间
+
 
 
 
