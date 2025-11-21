@@ -131,7 +131,7 @@ alloc_proc(void)
         // 初始化陷阱帧指针为NULL
         proc->tf = NULL;
         
-        // 初始化页目录基址为NULL
+        // 初始化页目录基址
         proc->pgdir = boot_pgdir_pa ;
         
         // 初始化进程标志为0
