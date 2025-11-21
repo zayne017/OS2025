@@ -8,6 +8,40 @@ alloc_proc函数（位于kern/process/proc.c中）负责分配并返回一个新
 
 - 请说明proc_struct中`struct context context`和`struct trapframe *tf`成员变量含义和在本实验中的作用是啥？（提示通过看代码和编程调试可以判断出来）
 
+1、初始化进程状态为未初始化 proc->state = PROC_UNINIT;
+
+2、初始化进程ID proc->pid = -1;
+      
+3、初始化运行次数 proc->runs = 0;
+        
+4、初始化内核栈地址 proc->kstack = 0;
+        
+5、初始化调度 proc->need_resched = 0;
+        
+6、初始化父进程指针 proc->parent = NULL;
+        
+7、初始化内存管理结构 proc->mm = NULL;
+        
+8、初始化上下文结构 memset(&(proc->context), 0, sizeof(struct context));
+        
+9、初始化陷阱帧指针 proc->tf = NULL;
+        
+10、初始化页目录基址 proc->pgdir = NULL;
+        
+11、初始化进程标志 proc->flags = 0;
+        
+12、初始化进程名称 memset(proc->name, 0, PROC_NAME_LEN + 1);
+
+struct context context：进程上下文保存结构，用于进程切换和恢复被调用者时保存寄存器。
+struct trapframe *tf：是帧结构，能保存进程在发生中断/异常时的完整CPU状态，处理完中断后，从陷阱帧恢复所有状态。
+void print_trapframe(struct trapframe *tf) {
+    cprintf("trapframe at %p\n", tf);
+    print_regs(&tf->gpr);          // 打印所有通用寄存器
+    cprintf("  status   0x%08x\n", tf->status);
+    cprintf("  epc      0x%08x\n", tf->epc);      // 异常发生时正在执行的指令地址
+    cprintf("  badvaddr 0x%08x\n", tf->badvaddr); // 引起异常的地址
+    cprintf("  cause    0x%08x\n", tf->cause);    // 异常原因代码
+}
 ## 练习2：为新创建的内核线程分配资源（需要编码）
 
 创建一个内核线程需要分配和设置好很多资源。kernel_thread函数通过调用**do_fork**函数完成具体内核线程的创建工作。do_kernel函数会调用alloc_proc函数来分配并初始化一个进程控制块，但alloc_proc只是找到了一小块内存用以记录进程的必要信息，并没有实际分配这些资源。ucore一般通过do_fork实际创建新的内核线程。do_fork的作用是，创建当前内核线程的一个副本，它们的执行上下文、代码、数据都一样，但是存储位置不同。因此，我们**实际需要"fork"的东西就是stack和trapframe**。在这个过程中，需要给新内核线程分配资源，并且复制原进程的状态。你需要完成在kern/process/proc.c中的do_fork函数中的处理过程。它的大致执行步骤包括：
@@ -266,6 +300,7 @@ get_pte()函数（位于`kern/mm/pmm.c`）用于在页表中查找或创建页�
 6.内核栈与中断帧，区分`context` 和 `tf` 。
 
 7.进程地址空间
+
 
 
 
