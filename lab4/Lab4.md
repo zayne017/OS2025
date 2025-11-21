@@ -258,7 +258,9 @@ static inline void __intr_restore(bool flag) {
 void intr_enable(void) { set_csr(sstatus, SSTATUS_SIE); }
 
 void intr_disable(void) { clear_csr(sstatus, SSTATUS_SIE); }
+
 具体调用关系如下
+
 关中断local_intr_save --> __intr_save --> intr_disable --> cli
 
 开中断local_intr_restore–> __intr_restore --> intr_enable --> sti
@@ -334,6 +336,7 @@ get_pte()函数（位于`kern/mm/pmm.c`）用于在页表中查找或创建页�
 6.内核栈与中断帧，区分`context` 和 `tf` 。
 
 7.进程地址空间
+
 
 
 
