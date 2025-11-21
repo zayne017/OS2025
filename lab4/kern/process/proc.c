@@ -132,7 +132,7 @@ alloc_proc(void)
         proc->tf = NULL;
         
         // 初始化页目录基址为NULL
-        proc->pgdir = NULL;
+        proc->pgdir = boot_pgdir_pa ;
         
         // 初始化进程标志为0
         proc->flags = 0;
