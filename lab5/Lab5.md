@@ -170,10 +170,113 @@ ret = page_insert(to, npage, start, perm);
 
 ## 练习3: 阅读分析源代码，理解进程执行 fork/exec/wait/exit 的实现，以及系统调用的实现（不需要编码）
 
-请在实验报告中简要说明你对 fork/exec/wait/exit函数的分析。并回答如下问题：
+请在实验报告中简要说明你对fork/exec/wait/exit函数的分析。并回答如下问题：
 
-- 请分析fork/exec/wait/exit的执行流程。重点关注哪些操作是在用户态完成，哪些是在内核态完成？内核态与用户态程序是如何交错执行的？内核态执行结果是如何返回给用户程序的？
-- 请给出ucore中一个用户态进程的执行状态生命周期图（包执行状态，执行状态之间的变换关系，以及产生变换的事件或函数调用）。（字符方式画即可）
+请分析fork/exec/wait/exit的执行流程。重点关注哪些操作是在用户态完成，哪些是在内核态完成？内核态与用户态程序是如何交错执行的？内核态执行结果是如何返回给用户程序的？
+
+- ```
+  static int
+  sys_fork(uint64_t arg[]) {
+      struct trapframe *tf = current->tf;
+      uintptr_t stack = tf->gpr.sp;
+      return do_fork(0, stack, tf);
+  }
+  ```
+
+  `fork()`->`sys_fork()`->`do_fork()`
+
+  `do_fork`函数：创建子进程 ，完成了父进程到子进程的复制和初始化工作。
+
+  检查当前系统中的进程数量 `nr_process` 是否已经达到了最大限制，之后调用 `alloc_proc()` 函数申请一块内存，用于存放新进程的进程控制块PCB。
+
+  设置父进程，将新进程的父进程指针指向当前进程`current`，并确保当前父进程没有处于等待状态。调用 `setup_kstack(proc)`分配内核栈，调用copy_mm()复制或共享内存空间。
+
+  之后调用`copy_thread(proc, stack, tf)`设置中断帧和上下文，将新进程分配PID，插入链表并建立进程关系`set_links(proc)`。最后修改新进程状态为RUNNABLE并返回PID。
+
+- ```
+  static int
+  sys_exec(uint64_t arg[]) {
+      const char *name = (const char *)arg[0];
+      size_t len = (size_t)arg[1];
+      unsigned char *binary = (unsigned char *)arg[2];
+      size_t size = (size_t)arg[3];
+      return do_execve(name, len, binary, size);
+  }
+  ```
+
+  `do_execve`函数：用一个新的应用程序替换当前进程的内存空间和上下文，但保留当前进程的 PID 和其他内核管理信息。
+
+  进行参数检查，检查传入的程序名称 `name` 指针是否合法，是否指向有效的用户空间内存。
+
+  在内核栈上开辟一块空间 `local_name`，将用户态传来的进程名字符串拷贝过来。
+
+  释放旧内存资源，切换页表，将引用计数减一，释放内存。
+
+  调用 `load_icode` 函数加载新程序，解析ELF格式的二进制文件头，创建新的 mm，创建新的页表，分配堆栈，设置 trapframe。
+
+  最后将刚刚备份在内核栈中的名字设置给当前进程。
+
+- ```
+  static int
+  sys_wait(uint64_t arg[]) {
+      int pid = (int)arg[0];
+      int *store = (int *)arg[1];
+      return do_wait(pid, store);
+  }
+  ```
+
+  `do_wait`函数：父进程等待其某个子进程终止并处于僵尸 (ZOMBIE) 状态，然后由父进程负责回收子进程的全部内核资源。
+
+  首先检查用户传入的 `code_store` 指针（存放子进程退出码）是否有效，之后开始循环，用于持续检查和等待子进程状态。
+
+  如果父进程调用的是 `waitpid(pid, ...)`，则使用 `find_proc(pid)` 查找，如果找到且状态是 `PROC_ZOMBIE`，则跳转到 `found` 清理资源。
+
+  如果父进程调用的是 `wait()`，则遍历当前进程的子进程链表，找到任意一个状态是 `PROC_ZOMBIE` 的子进程，则跳转到 `found`。
+
+  如果遍历完成，发现 `haskid == 1`，说明有子进程但没有僵尸进程，则父进程进行休眠，等待状态为 `WT_CHILD`，调用 `schedule()` 让出CPU，当被某个子进程执行 `do_exit` 叫醒后检查是否收到退出信号，然后跳转回 `repeat` 重新执行搜索僵尸进程的逻辑。如果`haskid == 0`没有子进程，返回错误码。
+
+  当找到一个僵尸子进程 `proc` 时，进行清理：获取退出码，在关中断的临界区内从链表和哈希表中移除进程，最后释放内核栈和PCB。
+
+- ```
+  static int
+  sys_exit(uint64_t arg[]) {
+      int error_code = (int)arg[0];
+      return do_exit(error_code);
+  }
+  ```
+
+  `do_exit`函数：清理当前进程的绝大部分资源，通知父进程，并将自身状态标记为僵尸 (ZOMBIE)，最后主动让出 CPU，等待父进程回收剩余的内核资源。
+
+  首先检查当前进程是否为`idleproc`或`initproc`，如果是，发出panic。
+
+  之后释放虚拟内存资源，这部分逻辑与 `do_execve` 中的清理逻辑一致。
+
+  将进程状态设置为 `PROC_ZOMBIE`，并将退出码保存到 `exit_code` 中。
+
+  在关中断的临界区中唤醒父进程，让它从 `do_wait` 函数中醒来并回收当前进程的资源。如果当前进程自己也有子进程，则需要当前进程的所有子进程，将它们的父进程指针 `parent` 修改为 `initproc`，并将它们插入到 `initproc` 的子进程链表中。
+
+  最后调用 `schedule()` 主动让出 CPU，由于当前进程状态已变为 `PROC_ZOMBIE`，它永远不会再被调度器选中，因此，`do_exit` 函数永远不会返回。
+
+哪些操作是在用户态完成，哪些是在内核态完成？
+
+系统调用的部分在用户态完成，具体函数在内核态完成，如下：
+
+| **阶段** | **用户态完成的操作 (User Mode)**                         | **内核态完成的操作 (Kernel Mode)**                           |
+| -------- | -------------------------------------------------------- | ------------------------------------------------------------ |
+| **Fork** | 发起 `fork()` 系统调用                                   | 分配 PCB、分配内核栈、调用 `copy_mm`复制/共享内存页表、构造子进程的 TrapFrame、加入调度队列。 |
+| **Exec** | 准备程序参数（`argv`）；发起 `exec()` 调用。             | 检查内存权限、销毁当前内存空间、调用 `load_icode` 解析 ELF 头、建立新内存映射、重置 TrapFrame 。 |
+| **Wait** | 父进程调用 `wait()` 或 `waitpid()`；接收子进程退出信息。 | 检查子进程状态、回收僵尸进程的 PCB 和内核栈。                |
+| **Exit** | 结束主函数或调用 `exit()`。                              | 释放虚拟内存资源、设置僵尸状态、唤醒父进程、托孤子进程给 `initproc`、执行最后一次调度。 |
+
+内核态与用户态程序是如何交错执行的？
+
+用户态通过发起系统调用提升特权级进入内核态，硬件自动跳转到 `stvec` 寄存器指向的内核中断入口`__alltraps`，进入`exception_handler`，内核保存当前用户进程的寄存器现场到内核栈的 `TrapFrame` 中，然后执行具体的系统调用处理函数。
+
+内核处理完用户的请求后执行 `__trapret`，从 `TrapFrame` 中恢复之前保存的寄存器，执行 `sret` 指令切换回用户态，PC 跳转到 `sepc` 寄存器指向的地址恢复用户程序执行。
+
+内核态执行结果是如何返回给用户程序的？
+
+请给出ucore中一个用户态进程的执行状态生命周期图（包执行状态，执行状态之间的变换关系，以及产生变换的事件或函数调用）。（字符方式画即可）
 
 执行：make grade。如果所显示的应用程序检测都输出ok，则基本正确。（使用的是qemu-1.0.1）
 
@@ -193,3 +296,4 @@ ret = page_insert(to, npage, start, perm);
 
 
 说明该用户程序是何时被预先加载到内存中的？与我们常用操作系统的加载有何区别，原因是什么？
+
