@@ -229,7 +229,7 @@ step
 p /x address
 ```
 `$1 = 0xffffffffc0203ff8`
-记录这个值，应该是 ...c02... 那个虚拟地址
+是为了这个地址报错
 
 
 我们跳到填表最后一步观察
@@ -250,9 +250,9 @@ p /x paddr    # 物理地址
 得到
 ```
 (gdb) p /x vaddr
-$2 = 0xffffffffc0203000
+$2 = 0xffffffffc0203000  # 虚拟地址
 (gdb) p /xpaddr
-$3 = -1071632384
+$3 = 0x80203000  # 物理地址
 
 TLB 查找与源码位置：
 - 在 QEMU 的 RISC‑V 实现中，TLB 是以软件结构模拟的缓存。常见的调用顺序是在 `get_physical_address` 中先尝试从软件 TLB 查找映射，若查不到则调用 `riscv_cpu_tlb_fill` 触发页表遍历，遍历结束后通过 `tlb_set_page` 将计算出的映射写入 TLB。可以在源码的 `target/riscv/cpu_helper.c` 中找到 `riscv_cpu_tlb_fill` 和 `tlb_set_page` 的实现，并在 `get_physical_address` 附近观察到 TLB 查询／分支逻辑。
@@ -281,11 +281,11 @@ step
 
 `if (mode == PRV_M ...)`：判定是 M 模式。
 
- `*physical = addr;`：**直接让物理地址等于虚拟地址**（恒等映射）。
+`*physical = addr;`：直接让物理地址等于虚拟地址（恒等映射）。
 
-`return TRANSLATE_SUCCESS;`：**直接返回**，完全无视了后面那一大坨查页表的代码。
+`return TRANSLATE_SUCCESS;`：直接返回，
 
-**整个过程跳过了后续的 SATP 读取和多级页表遍历循环。**
+整个过程跳过了后续的 SATP 读取和多级页表遍历循环。
 
 QEMU TLB 与真实 CPU 的逻辑差异：
 - QEMU 中的 TLB 是软件层面的快速缓存，主要用于减少频繁的页表遍历开销。它通常以简化的结构实现，条目中会包含虚拟页号、物理页号、权限位和可能的 ASID 信息，但并不模拟硬件 TLB 的所有微观行为，例如多级或多端口并发访问、具体的替换策略、以及与缓存/乱序执行的精确时序影响。
