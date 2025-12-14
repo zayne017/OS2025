@@ -336,7 +336,59 @@ ret = page_insert(to, npage, start, perm);
 执行：make grade。如果所显示的应用程序检测都输出ok，则基本正确。（使用的是qemu-1.0.1）
 
 ![lab5](./lab5%20makegrade.png)
+## 扩展练习 Challenge1
+int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
+               bool share) {
+    assert(start % PGSIZE == 0 && end % PGSIZE == 0);
+    assert(USER_ACCESS(start, end));
+    do {
+        pte_t *ptep = get_pte(from, start, 0), *nptep;
+        if (ptep == NULL) {
+            start = ROUNDDOWN(start + PTSIZE, PTSIZE);
+            continue;
+        }
+        if (*ptep & PTE_V) {
+            if ((nptep = get_pte(to, start, 1)) == NULL) {
+                return -E_NO_MEM;
+            }
+            uint32_t perm = (*ptep & PTE_USER);
+            struct Page *page = pte2page(*ptep);
+            int ret = 0;
 
+            if(share)
+            {
+                // 物理页面共享，并设置两个PTE上的标志位为只读
+                page_insert(from, page, start, perm & ~PTE_W);
+                ret = page_insert(to, page, start, perm & ~PTE_W);
+            }else{//原来的复制逻辑
+                struct Page *npage = alloc_page();
+                assert(page != NULL);
+                assert(npage != NULL);
+                uintptr_t* src = page2kva(page);
+                uintptr_t* dst = page2kva(npage);
+                memcpy(dst, src, PGSIZE);
+                // 将目标页面地址设置到PTE中
+                ret = page_insert(to, npage, start, perm);
+            }
+            assert(ret == 0);
+        }
+        start += PGSIZE;
+    } while (start != 0 && start < end);
+    return 0;
+}
+主要流程:
+  1. 参数验证
+  2. 按页遍历地址范围
+  3. 对每个有效页面:
+     a. 获取源PTE
+     b. 创建目标PTE
+     c. 根据share标志选择共享或复制
+     d. 建立映射
+如果share的值为true，也就是启动共享机制，我们不需要像原来的代码那样进行页面的申请和复制，只需要通过调用 page_insert 函数，将源进程（from）中对应页面的权限重新设置为 perm & ~PTE_W，也就是在原权限基础上清除可写（PTE_W）标志位，使其变为只读，这样多个进程共享该物理页面时，就可以实现可读不可写的要求了。
+
+然后，我们同样调用 page_insert 函数，将目标进程（to）中对应页面的权限也设置为 perm & ~PTE_W，达到两个进程共享同一个物理页面且都以只读方式访问的效果。只有当某个进程尝试对该共享页面进行写操作时（触发写时复制机制），才会去分配新的物理页面进行真正的复制操作，实现内存的高效利用以及数据的一致性保护。
+
+如果share为false的时候，就说明我们不启用共享的机制，我们只需要执行原来的代码，完成页面的分配和内存的复制即可。
 ## 扩展练习 Challenge2
 
 说明该用户程序是何时被预先加载到内存中的？与我们常用操作系统的加载有何区别，原因是什么？
@@ -346,6 +398,7 @@ ret = page_insert(to, npage, start, perm);
 在常见操作系统中，程序以文件形式存在于磁盘上的文件系统中，用户双击图标或在命令行输入命令，由 Shell/桌面管理器请求内核执行 `exec`进行加载文件，加载时主要使用动态链接，不会加载整个程序内容。而uCore 实验环境中用户程序作为二进制数据保存，在内核启动后不久，第一个用户进程立即被加载和执行，用户程序里包含了所有它运行需要的代码，程序从内核数据区一次性全部复制到分配好的用户内存页中。
 
 区别原因是为了简化环境方便掌握核心概念，没有引入完整的文件系统。使用硬编码加载避免了因文件系统损坏、权限错误或 I/O 驱动 bug 导致的启动失败，保证实验环境的稳定性和可重复性。
+
 
 
 
