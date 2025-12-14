@@ -339,42 +339,85 @@ ret = page_insert(to, npage, start, perm);
 ## 扩展练习 Challenge1
 int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
                bool share) {
+    // 参数校验：确保地址页面对齐且在用户空间范围内
     assert(start % PGSIZE == 0 && end % PGSIZE == 0);
     assert(USER_ACCESS(start, end));
+    
+    // 循环处理[start, end)范围内的每一页
     do {
+        // 获取源页表中当前地址的页表项
         pte_t *ptep = get_pte(from, start, 0), *nptep;
+        
+        // 如果PTE不存在，说明该页未映射，跳过到下一页表边界
         if (ptep == NULL) {
+            // 跳过整个页表（PTSIZE通常为4MB），继续检查下一页表
             start = ROUNDDOWN(start + PTSIZE, PTSIZE);
             continue;
         }
+        
+        // 如果源页表项有效（页面已映射）
         if (*ptep & PTE_V) {
+            // 为目标页表创建对应的页表项（create=1表示不存在时创建）
             if ((nptep = get_pte(to, start, 1)) == NULL) {
-                return -E_NO_MEM;
+                return -E_NO_MEM;  // 内存不足，无法创建页表结构
             }
+            
+            // 获取源页面的权限标志（只保留用户可访问权限位）
             uint32_t perm = (*ptep & PTE_USER);
+            // 获取对应的物理页面结构
             struct Page *page = pte2page(*ptep);
             int ret = 0;
 
-            if(share)
-            {
-                // 物理页面共享，并设置两个PTE上的标志位为只读
+            // ========== 共享模式（COW写时复制） ==========
+            if(share) {
+                /**
+                 * COW共享处理流程：
+                 * 1. 修改源进程的页表项：清除写权限（标记为只读）
+                 *    注：实际COW实现中可能还需设置特殊标志位（如PTE_COW）
+                 * 2. 目标进程映射同一物理页，同样只读权限
+                 * 3. 当任一进程尝试写入时触发页面错误，执行真正的复制
+                 */
+                
+                // 修改源进程页表：清除写权限，为后续COW做准备
                 page_insert(from, page, start, perm & ~PTE_W);
+                // 目标进程映射同一物理页（只读）
                 ret = page_insert(to, page, start, perm & ~PTE_W);
-            }else{//原来的复制逻辑
+            }
+            // ========== 复制模式（完整复制） ==========
+            else {
+                /**
+                 * 完整复制处理流程：
+                 * 1. 分配新的物理页面
+                 * 2. 复制源页面内容到新页面
+                 * 3. 将新页面映射到目标页表
+                 */
+                
+                // 分配新的物理页面用于复制
                 struct Page *npage = alloc_page();
-                assert(page != NULL);
-                assert(npage != NULL);
-                uintptr_t* src = page2kva(page);
-                uintptr_t* dst = page2kva(npage);
+                assert(page != NULL);   // 确保源页面存在
+                assert(npage != NULL);  // 确保新页面分配成功
+                
+                // 获取源页面和目标页面的内核虚拟地址
+                uintptr_t* src = page2kva(page);  // 源页面内核虚拟地址
+                uintptr_t* dst = page2kva(npage); // 目标页面内核虚拟地址
+                
+                // 复制整个页面内容（4KB）
                 memcpy(dst, src, PGSIZE);
-                // 将目标页面地址设置到PTE中
+              
+                // 将新复制的页面插入目标页表
                 ret = page_insert(to, npage, start, perm);
             }
+            
+            // 确保页面插入操作成功
             assert(ret == 0);
         }
+        
+        // 处理下一页（按页大小4KB递增）
         start += PGSIZE;
-    } while (start != 0 && start < end);
-    return 0;
+        
+    } while (start != 0 && start < end);  // 循环直到处理完指定范围或地址回绕
+    
+    return 0;  // 成功返回
 }
 主要流程:
   1. 参数验证
@@ -389,6 +432,90 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
 然后，我们同样调用 page_insert 函数，将目标进程（to）中对应页面的权限也设置为 perm & ~PTE_W，达到两个进程共享同一个物理页面且都以只读方式访问的效果。只有当某个进程尝试对该共享页面进行写操作时（触发写时复制机制），才会去分配新的物理页面进行真正的复制操作，实现内存的高效利用以及数据的一致性保护。
 
 如果share为false的时候，就说明我们不启用共享的机制，我们只需要执行原来的代码，完成页面的分配和内存的复制即可。
+
+
+static int pgfault_handler(struct trapframe *tf) {
+    uintptr_t addr = tf->tval;
+    uint32_t error_code = tf->cause;
+    
+    // cprintf("=== pgfault_handler: addr=0x%x, cause=%d ===\n", addr, error_code);
+    
+    if (current == NULL) {
+        // cprintf("  current == NULL\n");
+        print_trapframe(tf);
+        panic("page fault in kernel!");
+    }
+   
+trap.c中设置pgfault_handler 主页面错误处理函数，完成以下程序
+
+页面错误发生 → CPU陷入异常 → 调用pgfault_handler
+    ↓
+检查错误原因（tf->tval包含故障地址，tf->cause包含错误类型）
+    ↓
+安全检查：确保不是内核或内核线程中的错误
+    ↓
+检查是否为COW触发的写错误
+    ↓
+如果是COW写错误 → 调用do_cow_page_fault
+如果不是COW错误 → 打印错误信息并返回失败
+
+同时设立current->mm == NULL：判断内核线程没有用户空间内存映射，(*ptep & PTE_COW)：页面标记为COW页，error_code == CAUSE_STORE_PAGE_FAULT：写操作触发错误
+
+static int do_cow_page_fault(struct mm_struct *mm, uint32_t error_code, uintptr_t addr)将情况分为两种：
+
+情况一：仅有一个引用（ref_count == 1）
+
+只有一个进程引用该页
+    ↓
+不需要复制物理页
+    ↓
+直接修改PTE：清除COW标志，恢复写权限
+    ↓
+刷新TLB（确保缓存一致性）
+    ↓
+返回成功（性能最优路径）
+
+情况二：多个引用（ref_count > 1）
+
+多个进程共享该页
+    ↓
+1. 分配新物理页
+    ↓
+2. 复制原页面内容到新页
+    ↓
+3. 减少原页面的引用计数
+    ↓
+4. 修改PTE指向新页
+    ↓
+5. 设置新页面的引用计数为1
+    ↓
+6. 刷新TLB
+    ↓
+返回成功（完成真正的写时复制）
+
+我们编写test文件对cow和dirtycow进行测试，Dirty COW漏洞利用是一种竞争条件漏洞利用。在这种情况下，攻击者利用内核在运行时获得的root权限，并创建了竞争条件，使特权从低级用户升级到具有完全 root权限的用户。
+
+cow测试文件的思路是首先初始化
+
+阶段二：fork创建子进程，此时父子进程共享同一物理页（标记为COW），所有页面被设置为只读权限
+
+阶段三：子进程只读操作
+
+阶段四：子进程写入操作
+
+// 子进程修改数据：data[i] = i * 200
+// 这会触发COW页面错误
+// 内核为子进程分配新页，复制数据
+// 子进程获得独立副本，父进程数据不变
+
+阶段五：验证结果
+
+// 子进程：修改后求和
+// 父进程：等待子进程结束，验证自己的数据
+
+dirtycow测试思路是模拟Dirty COW漏洞的核心场景：父子进程并发访问同一COW页面
+
+测试在多次快速写入时，COW机制是否能保持数据一致性，步骤和cow测试基本一致。
 ## 扩展练习 Challenge2
 
 说明该用户程序是何时被预先加载到内存中的？与我们常用操作系统的加载有何区别，原因是什么？
@@ -398,6 +525,7 @@ int copy_range(pde_t *to, pde_t *from, uintptr_t start, uintptr_t end,
 在常见操作系统中，程序以文件形式存在于磁盘上的文件系统中，用户双击图标或在命令行输入命令，由 Shell/桌面管理器请求内核执行 `exec`进行加载文件，加载时主要使用动态链接，不会加载整个程序内容。而uCore 实验环境中用户程序作为二进制数据保存，在内核启动后不久，第一个用户进程立即被加载和执行，用户程序里包含了所有它运行需要的代码，程序从内核数据区一次性全部复制到分配好的用户内存页中。
 
 区别原因是为了简化环境方便掌握核心概念，没有引入完整的文件系统。使用硬编码加载避免了因文件系统损坏、权限错误或 I/O 驱动 bug 导致的启动失败，保证实验环境的稳定性和可重复性。
+
 
 
 
