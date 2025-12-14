@@ -410,3 +410,14 @@ target_ulong helper_sret(CPURISCVState *env, target_ulong cpu_pc_deb)
 1. 安全性：首先确保指令是在内核态执行，否则抛出异常。
 2. 原子性恢复：它从 `sepc` 获取返回地址，并根据 `mstatus` 中的 `SPP` 位恢复之前的特权级（在我们的调试中，`prev_priv` 为 0）。
 3. 核心切换：`riscv_cpu_set_mode` 函数是实现特权级切换的关键，执行该行代码后，CPU 正式从 Supervisor Mode 降级回 User Mode，同时恢复了用户程序的中断响应能力。
+
+## 要求2：TCG说明及与双重 gdb 实验的关联
+
+TCG（Tiny Code Generator）是 QEMU 的动态二进制翻译子系统。它把客户机（guest）指令块转换成一组中间操作（TCG ops），再由后端生成宿主（host）机器码并缓存成翻译块（translation block，TB）。执行时若遇到已生成的 TB 则直接执行宿主机器码，否则触发翻译流程生成并缓存新的 TB。TCG 的源码主要分布在 `accel/tcg` 目录，目标架构的指令解码与翻译入口在 `target/<arch>` 下的 translate/translate.c 或类似文件中，执行循环和 TB 管理则在 `accel/tcg` 与 `accel/tcg/*` 文件中实现。
+
+与本次双重 gdb 调试的关系：
+- 在我们的实验里，触发 `ecall` 和 `sret` 时会导致 QEMU 执行与异常/特权切换相关的逻辑。TCG 在翻译这些客户机指令时，通常会将复杂的特权行为生成为对运行时代码（helpers）的调用，或者直接生成等价的宿主代码。无论是哪种方式，关键点是这些 helper 函数（例如 `riscv_raise_exception`、`riscv_cpu_do_interrupt`、`helper_sret`）都会被调用或等效地执行其语义，因此在附加到 QEMU 的 GDB 上为这些 helper 打断点是可靠的调试策略。
+- 我们的双重 gdb 流程本质上是在客户机层（内核/用户程序）和宿主层（QEMU 进程）分别设置断点并单步。TCG 可能会把多条客户机指令合并为一个宿主 TB，因此如果只在宿主进程层设断点而不考虑 helper，单步客户机指令时可能观察不到期望的边界。幸好处理特权转换和异常的逻辑一般由 helper 函数实现或在生成的代码中显式调用这些 helper，因此在 QEMU 上拦截这些 helper 可以稳定地捕获特权切换事件，不受 TB 缓存的影响。
+- 额外注意：TCG 有时会内联某些简单操作以减少调用开销，这会让某些细粒度事件难以直接通过宿主函数边界观察到。若需要完全跟踪每一条客户机指令的逐条执行，可选择禁用 TCG（使用解释器模式）或在 QEMU 源码中查找并在生成代码前的翻译入口处插入断点或日志以观察 TCG ops 流。
+
+小结：TCG 是提升 QEMU 性能的关键，但在调试特权指令（如 ecall、sret）时，因这些操作最终会走到明确的 helper 或翻译入口，双重 gdb 的调试方法仍然有效且可重复。若想深入研究 TCG 本身，可以在 `accel/tcg` 目录下按关键词 `tcg`、`tb`、`gen_code` 搜索翻译与生成相关实现，并在翻译入口处设置断点观察 TCG ops 的生成过程。
