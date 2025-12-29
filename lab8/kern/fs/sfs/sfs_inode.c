@@ -623,93 +623,71 @@ sfs_io_nolock(struct sfs_fs *sfs, struct sfs_inode *sin, void *buf, off_t offset
 	*/
 
     // Step 1: 处理头部
-    // 1. 计算我们在当前块内的偏移量 如blkoff = 4000 % 4096 = 4000
+        // 1. 计算我们在当前块内的偏移量 如blkoff = 4000 % 4096 = 4000
     blkoff = offset % SFS_BLKSIZE;
-    // 如果 blkoff 是 0，说明刚好对齐（比如从 4096 开始读），那就不用处理头部，直接跳过。
+    // 如果 blkoff 是 0，说明刚好对齐，就不用处理头部，直接跳过。
     if (blkoff != 0) {//如果偏移量不是0
         // 2. 计算这一步要读多少字节 size
-        // nblks 是“我们要跨越多少个完整块”。
-        // 如果 nblks != 0 (我们要读 5000 字节，肯定跨块了)，说明这块读不完请求的数据。
-        //    所以我们要读完这一块剩余的所有空间：4096 - 4000 = 96 字节。
-        // 如果 nblks == 0 (假设我们只想读 10 个字节)，那没跨块。
-        //    所以直接读 endpos - offset 这么多就行。
+        // 如果 nblks != 0 ，说明这块读不完请求的数据，要跨块。
+        // 所以我们要读完这一块剩余的所有空间：4096 - 4000 = 96 字节。
+        // 如果 nblks == 0，没跨块。
+        // 直接读 endpos - offset。
         size = (nblks != 0) ? (SFS_BLKSIZE - blkoff) : (endpos - offset);
         // 3. 根据逻辑块号 blkno，找到对应的物理块号 ino
         if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
             goto out;
         }
-        // 4. 调用 buf_op 函数读写数据
-        // 意思：从物理块 ino 的第 blkoff (4000) 字节开始，读 size (96) 字节，存入 buf。
+        // 4. 调用 buf_op 函数读写数据，存入 buf。
         if ((ret = sfs_buf_op(sfs, buf, size, ino, blkoff)) != 0) {
             goto out;
         }
         // 5. 更新进度
-        alen += size; // 已经读了 96 字节
-        buf = (char *)buf + size;  // buf 指针往后挪 96 字节
-        // 特殊情况：如果本来就不用跨块，刚才那一下就读完了，直接收工。
+        alen += size; 
+        buf = (char *)buf + size; 
+        // 特殊情况：如果不用跨块，一下就读完了。
         if (nblks == 0) {
             goto out;
         }
         // 6. 头部处理完了，准备进入下一块
-        blkno++;  // 逻辑块号从 0 变成 1
+        blkno++;  // 逻辑块号
         nblks--;  // 剩余的完整块数减 1
 
     }
     // Step 2: 处理中间的完整块
-    // 只要 nblks > 0，说明还有完整的块等着我们
-    while (nblks > 0) {
-        
-        // 1. 【查表】
-        // 现在的 blkno 是 1。问：第 1 块在磁盘哪里？ -> ino
+     // 只要 nblks > 0，说明还有完整的块需要读取
+    while (nblks > 0) {       
+        // 1. sfs_bmap_load_nolock根据逻辑块号blkno找到物理块号ino
         if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
             goto out;
-        }
-        
-        // 2. 【干活】读整块
-        // 注意这里用的是 sfs_block_op (即 sfs_rblock)。
-        // 它不需要 offset 参数，因为是从块头开始读。
-        // 它不需要 size 参数 (除非最后那个 nblks)，因为它默认就是读一整块 (4096)。
+        }       
+        // 2. 读整块
         if ((ret = sfs_block_op(sfs, buf, ino, 1)) != 0) {
             goto out;
         }
-
-        // 3. 【推指针】大大方方地更新
+        // 3. 更新
         alen += SFS_BLKSIZE; // +4096
         buf = (uint8_t *)buf + SFS_BLKSIZE; // buffer 指针后移 4096
-        blkno++;             // 准备搞第 2 块
-        nblks--;             // 计数器减 1
+        blkno++;             // 逻辑块号后移
+        nblks--;             // 需要读写的完整块的数量减 1
     }
 
     // Step 3: 处理尾部
     // 1. 计算还剩多少没读
-    // endpos (9000) - (offset初始值 4000 + alen已读 4192) = 808
     size = endpos - (offset + alen);
-    
-    // 如果 size > 0，说明屁股还没擦干净
-    if (size > 0) {
-        
-        // 2. 【查表】
-        // 现在的 blkno 是 2。问：第 2 块在磁盘哪里？ -> ino
+    // 如果 size > 0，说明还有尾部的块
+    if (size > 0) {        
+        // 2. sfs_bmap_load_nolock根据逻辑块号blkno找到物理块号ino
         if ((ret = sfs_bmap_load_nolock(sfs, sin, blkno, &ino)) != 0) {
             goto out;
-        }
-        
-        // 3. 【干活】读最后一段
-        // 调用 sfs_buf_op (sfs_rbuf)。
-        // 注意参数：
-        //   ino: 第 2 块的物理号
-        //   0:   块内偏移是 0 (因为是从第 2 块开头开始读的)
+        }        
+        // 3. 读最后一段
+        // 调用 sfs_buf_op (sfs_rbuf)
         if ((ret = sfs_buf_op(sfs, buf, size, ino, 0)) != 0) {
             goto out;
-        }
-        
-        // 4. 【收尾】
-        alen += size; // 加上最后的 808
+        }       
+        // 4. 收尾
+        alen += size; // 加上最后的 size
     }
-
-
-
-    
 
 out:
     *alenp = alen; // 告诉调用者实际读写了多少
