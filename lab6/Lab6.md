@@ -153,9 +153,9 @@
 
   物理时钟触发中断，跳转到内核中断处理入口 `trap()`，调用 `trap_dispatch()`，switch 到 `case IRQ_S_TIMER` 分支->调用 `sched_class_proc_tick(current)`，实际调用的是 `sched_class->proc_tick(rq, current)`，扣除时间片，如果时间片为0则将进程的 `need_resched` 标志位置为 1->`trap()` 函数执行 `if (current->need_resched)`，如果标志位是1，调用`schedule()` 函数->关中断，将标志位置0，将进程进入队列，选出将要运行的进程并出队，最后调用 `proc_run(next)`进行进程的切换。
 
-  ![image-20251228204416058](C:\Users\lenovo\AppData\Roaming\Typora\typora-user-images\image-20251228204416058.png)
+ ![lab6](./lab6_1.png)
 
-  ![image-20251228204438867](C:\Users\lenovo\AppData\Roaming\Typora\typora-user-images\image-20251228204438867.png)
+ ![lab6](./lab6_2.png)
 
   `need_resched` 的作用：它是一个布尔标记（0 或 1），位于 `struct proc_struct` 中。
 
@@ -319,7 +319,7 @@
 
 - 展示 make grade 的**输出结果**，并描述在 QEMU 中观察到的调度现象。
 
-  ![image-20251229204619908](C:\Users\lenovo\AppData\Roaming\Typora\typora-user-images\image-20251229204619908.png)
+ ![lab6](./lab6_3.png)
 
   make qemu：
 
