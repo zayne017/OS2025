@@ -514,8 +514,7 @@ int pipe_read(int fd,void *buf,unsigned int count);//管道读操作接口
 
  int pipe_write(int fd, void *buf, unsigned int count);//管道写操作接口  
  
- 
-##扩展练习 Challenge2：完成基于“UNIX的软连接和硬连接机制”的设计方案
+## 扩展练习 Challenge2：完成基于“UNIX的软连接和硬连接机制”的设计方案
 
 如果要在ucore里加入UNIX的软连接和硬连接机制，至少需要定义哪些数据结构和接口？（接口给出语义即可，不必具体实现。数据结构的设计应当给出一个（或多个）具体的C语言struct定义。在网络上查找相关的Linux资料和实现，请在实验报告中给出设计实现”UNIX的软连接和硬连接机制“的概要设方案，你的设计应当体现出对可能出现的同步互斥问题的处理。）
 
@@ -624,6 +623,7 @@ int remove_hlink(const char *link_path);
 
 
 int remove_slink(const char *link_path);
+
 
 
 
