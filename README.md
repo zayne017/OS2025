@@ -28,10 +28,13 @@ lab4 进程管理
 
 lab5 用户程序
 
-- do_execve do_fork 
+- do_execve do_fork
+- lab2 branch：gdb 调试页表查询过程
+- lab5 branch：gdb 调试系统调用 ecall 及返回 sret
 
 lab6 进程调度
 
-- Round Robin Stride Scheduling
+- 调度算法 Round Robin Stride Scheduling FIFO SJF
 
 lab8 文件系统
+
