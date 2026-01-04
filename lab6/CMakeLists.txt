@@ -62,10 +62,15 @@ add_executable(lab6
         kern/mm/vmm.h
         kern/process/proc.c
         kern/process/proc.h
+        kern/schedule/default_sched.c
         kern/schedule/default_sched.h
         kern/schedule/default_sched_stride.c
         kern/schedule/sched.c
         kern/schedule/sched.h
+        kern/schedule/sched_fifo.c
+        kern/schedule/sched_fifo.h
+        kern/schedule/sched_sjf.c
+        kern/schedule/sched_sjf.h
         kern/sync/sync.h
         kern/syscall/syscall.c
         kern/syscall/syscall.h

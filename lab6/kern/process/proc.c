@@ -169,7 +169,7 @@ alloc_proc(void)
         // 这里初始化为 0 或 1 都可以。通常设为 0，具体运行时的优先级会在 enqueue 或 fork 时确定
         // 注意：Stride 算法中步长 = BIG_STRIDE / priority，所以优先级不能为 0，
         // 但 alloc_proc 只是申请内存，真正的 default priority 设置通常在 do_fork 中或者是 default_sched 的 init 逻辑中
-        proc->lab6_priority = 0;
+        proc->lab6_priority = 1;
 
     }
     return proc;
@@ -1018,7 +1018,11 @@ user_main(void *arg)
 #ifdef TEST
     KERNEL_EXECVE2(TEST, TESTSTART, TESTSIZE);
 #else
+    // Enable one workload at a time to evaluate specific schedulers.
     KERNEL_EXECVE(priority);
+   // KERNEL_EXECVE(test_sjf);
+   // KERNEL_EXECVE(test_fifo);
+   // KERNEL_EXECVE(test_stride);
 #endif
     panic("user_main execve failed.\n");
 }
