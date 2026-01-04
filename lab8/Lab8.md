@@ -463,35 +463,47 @@ make qemu:
 /* 管道缓冲区结构 */
 struct pipe_buffer {
     
-    struct page *page     //缓冲区所在页
+    struct page *page     //缓冲区所在页  
     
-    unsigned int offset;    // 缓冲区偏移量
+    unsigned int offset;    // 缓冲区偏移量  
     
-    unsigned int flags;                   // 标志位
+    unsigned int flags;                   // 标志位  
     
-    unsigned int len         //缓冲区长度
     
-    bool is_full;           // 缓冲区是否满
+    unsigned int len         //缓冲区长度  
     
-    bool is_empty;          // 缓冲区是否空
+    
+    bool is_full;           // 缓冲区是否满  
+    
+    
+    bool is_empty;          // 缓冲区是否空  
+    
 };
 
 管道结构体
 
 struct pipe_inode_info {
-     unsigned int readers;  // 读端计数
+     unsigned int readers;  // 读端计数  
      
-    unsigned int writers;  // 写端计数
+     
+    unsigned int writers;  // 写端计数  
     
-    unsigned int buffernr   //缓冲区数量
     
-    unsigned int buffercur   //缓冲区数组
+    unsigned int buffernr   //缓冲区数量  
     
-    wait_queue_t wait   //等待队列
     
-    unsigned int waitwriter  //等待写的数量s    list_entry_t pipe_inode_link;   //管道链表
+    unsigned int buffercur   //缓冲区数组  
     
-    struct inode *inode_pipe:     //管道对应inode
+    
+    wait_queue_t wait   //等待队列  
+    
+    
+    unsigned int waitwriter  //等待写的数量s  
+    list_entry_t pipe_inode_link;   //管道链表  
+    
+    
+    struct inode *inode_pipe:     //管道对应inode  
+    
     };
 
 相关接口
@@ -505,5 +517,6 @@ int pipe_read(int fd,void *buf,unsigned int count);//管道读操作接口
 ##扩展练习 Challenge2：完成基于“UNIX的软连接和硬连接机制”的设计方案
 
 如果要在ucore里加入UNIX的软连接和硬连接机制，至少需要定义哪些数据结构和接口？（接口给出语义即可，不必具体实现。数据结构的设计应当给出一个（或多个）具体的C语言struct定义。在网络上查找相关的Linux资料和实现，请在实验报告中给出设计实现”UNIX的软连接和硬连接机制“的概要设方案，你的设计应当体现出对可能出现的同步互斥问题的处理。）
+
 
 
