@@ -512,11 +512,119 @@ int creat_pipe(unsigned int pipfd[2]);//创建管道函数
 
 int pipe_read(int fd,void *buf,unsigned int count);//管道读操作接口
 
- int pipe_write(int fd, void *buf, unsigned int count);//管道写操作接口
+ int pipe_write(int fd, void *buf, unsigned int count);//管道写操作接口  
+ 
  
 ##扩展练习 Challenge2：完成基于“UNIX的软连接和硬连接机制”的设计方案
 
 如果要在ucore里加入UNIX的软连接和硬连接机制，至少需要定义哪些数据结构和接口？（接口给出语义即可，不必具体实现。数据结构的设计应当给出一个（或多个）具体的C语言struct定义。在网络上查找相关的Linux资料和实现，请在实验报告中给出设计实现”UNIX的软连接和硬连接机制“的概要设方案，你的设计应当体现出对可能出现的同步互斥问题的处理。）
+
+在UNIX文件系统中，文件由两部分组成：
+
+Inode（索引节点）：存储文件的元数据（权限、所有者、时间戳、数据块指针等）
+
+Data Blocks（数据块）：存储文件的实际内容
+
+硬链接是文件系统中对同一个Inode的多个目录引用，也就是说硬链接是给文件一个副本，同时建立两者之间的连接关系。  
+
+硬链接特性
+
+文件有相同的索引节点inode及数据块data block，并且不允许为目录创建硬链接;
+
+直接访问原文件，无间接开销
+
+所有硬链接等价，删除任一不影响其他，所有都被删除时，文件数据块被释放
+
+不能跨不同文件系统创建硬链接
+
+通常不允许对目录创建硬链接（避免循环引用）  
+
+软链接（符号链接）是特殊的文件，其内容是指向目标文件路径的字符串。访问时替换自身路径，相当于给文件一个快捷方式。  
+
+ 软链接特性  
+ 
+可以链接到不同文件系统的文件
+
+可以对目录创建软链接
+
+可以链接到不存在的文件
+
+
+需要额外的Inode和数据块
+
+
+目标文件删除后，软链接成为"悬空链接"，即danglinglink
+
+软链接有自己的文件属性及权限等;
+
+硬链接通过共享相同的inode实现，而软链接则是创建一个新的inode，并在其内容中保存原路径的信息。
+
+设计时需要对inode拓展int ref_count引用计数，同时需要  
+
+struct link {
+struct inode *inode; //指向inode的指针  
+
+int link_count;//链接计数  
+
+bool is_symlink;//是否是软链接
+ };
+
+相关接口  
+创建硬链接:  
+
+查找目标文件的Inode
+
+验证权限（需要写权限）
+
+在目标目录创建新的目录项
+
+设置目标文件的Inode编号
+
+设置新的链接名称
+
+目标Inode的引用计数加1
+
+更新目录内容到磁盘  
+
+ int create_hlink(const char *source_path, const char *target_path);  
+ 
+创建软链接：
+
+分配新的Inode
+
+将目标路径字符串存储到Inode或数据块中
+
+在目录中创建新的目录项指向该Inode
+
+设置Inode的路径字符串长度
+
+写入磁盘  
+
+int create_slink(const char *source-path, const char *target-path);  
+
+删除硬链接：  
+
+从目录中移除对应的目录项
+
+对应Inode的计数减1
+
+如果计数变为0：
+
+释放文件占用的所有数据块
+
+释放Inode本身
+
+更新目录和Inode到磁盘  
+
+int remove_hlink(const char *link_path);  
+
+删除软链接：  
+
+只需将软链接对应的inode从磁盘上删除即可。该接口函数设计代码如下:  
+
+
+int remove_slink(const char *link_path);
+
 
 
 
